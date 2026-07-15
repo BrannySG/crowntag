@@ -1,3 +1,4 @@
+import { DurableObject } from 'cloudflare:workers';
 import { CAP, CONTENT_REVISION, TICK_HZ } from '@crowntag/content';
 import type {
   ClientMessage,
@@ -20,6 +21,7 @@ export interface Env {
 
 /** Single named arena for ticket #15 (full Matchmaker is #17). */
 const SOLO_ARENA_ID = 'arena-1';
+
 type Attachment = {
   fighterId: string;
   displayName: string;
@@ -31,12 +33,7 @@ const TICK_MS = 1000 / TICK_HZ;
  * Stub Matchmaker: always routes Join to the solo Arena.
  * Occupancy bookkeeping for parallel rooms lands in #17.
  */
-export class Matchmaker implements DurableObject {
-  constructor(
-    private readonly ctx: DurableObjectState,
-    private readonly env: Env,
-  ) {}
-
+export class Matchmaker extends DurableObject<Env> {
   async fetch(request: Request): Promise<Response> {
     if (request.method !== 'POST') {
       return new Response('Method not allowed', { status: 405 });
@@ -62,15 +59,13 @@ export class Matchmaker implements DurableObject {
 /**
  * Authoritative Arena: Hibernation WebSocket API + 20 Hz sim tick while occupied.
  */
-export class Arena implements DurableObject {
+export class Arena extends DurableObject<Env> {
   private world: World = createArenaWorld();
   private tickTimer: ReturnType<typeof setInterval> | null = null;
   private fighterSeq = 0;
 
-  constructor(
-    private readonly ctx: DurableObjectState,
-    private readonly env: Env,
-  ) {
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
     // Restore any hibernated sockets into sim on wake (attachments carry ids).
     this.ctx.blockConcurrencyWhile(async () => {
       for (const ws of this.ctx.getWebSockets()) {
