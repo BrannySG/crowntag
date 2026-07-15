@@ -40,6 +40,7 @@ declare global {
       ragdoll: BunnyRagdoll;
       getHipsY: () => number | null;
       listBones: () => string[];
+      tuning: typeof ragdollTuning;
     };
   }
 }
@@ -232,6 +233,7 @@ async function main() {
   physicsFolder.add(ragdollTuning, 'maxLinvel', 1, 40, 0.5).onChange(saveTuningToStorage);
   physicsFolder.add(ragdollTuning, 'maxAngvel', 1, 60, 0.5).onChange(saveTuningToStorage);
   physicsFolder.add(ragdollTuning, 'massDensity', 10, 200, 1).onChange(saveTuningToStorage);
+  physicsFolder.add(ragdollTuning, 'inertiaScale', 0.1, 50, 0.1).onChange(saveTuningToStorage);
   physicsFolder.add(ragdollTuning, 'solverIterations', 1, 32, 1).onChange(saveTuningToStorage);
   physicsFolder.add(ragdollTuning, 'revoluteLimitMin', -Math.PI, Math.PI, 0.05).onChange(saveTuningToStorage);
   physicsFolder.add(ragdollTuning, 'revoluteLimitMax', -Math.PI, Math.PI, 0.05).onChange(saveTuningToStorage);
@@ -609,6 +611,7 @@ async function main() {
     ragdoll,
     getHipsY,
     listBones: () => listSkeletonBoneNames(characterRoot),
+    tuning: ragdollTuning,
   };
 
   document.getElementById('standBtn')?.addEventListener('click', (e) => {

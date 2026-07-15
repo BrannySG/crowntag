@@ -1,5 +1,5 @@
 /** Bumped when tweakable content that clients must agree on changes. */
-export const CONTENT_REVISION = '5';
+export const CONTENT_REVISION = '6';
 
 /** Default Cap for an Arena (ADR domain). */
 export const CAP = 12;
@@ -52,7 +52,7 @@ export const HIT = {
   hitRange: 2.4,
   hitArcDeg: 90,
   hitCooldown: 0.35,
-  stunDuration: 0.7,
+  stunDuration: 2.0,
   knockbackStrength: 11,
 } as const;
 

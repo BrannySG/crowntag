@@ -39,6 +39,13 @@ export type FighterVisual = {
   isPlaceholder?: boolean;
   /** True while ragdoll is active or kinematic recover blend owns the pose. */
   ownsRootTransform?: () => boolean;
+  /** Soft-network / event path: start knockdown with hit impulse. */
+  triggerStunRagdoll?: (impulse: { vx: number; vz: number }) => void;
+  /**
+   * True once when knockdown → recover; scene snaps display pose to authority.
+   * Cleared when read.
+   */
+  consumePoseSnapRequest?: () => boolean;
   update(
     f: FighterSnapshot,
     opts: { holding: boolean; tintColor: number },
@@ -170,6 +177,7 @@ function createBunnyVisual(): FighterVisual {
   let settleHold = 0;
   let poseBlend: ReturnType<typeof createPoseBlend> | null = null;
   let blending = false;
+  let poseSnapRequest = false;
   let currentAction: THREE.AnimationAction | null = null;
   let currentActionName: string | null = null;
   let prevOnGround = true;
@@ -186,6 +194,37 @@ function createBunnyVisual(): FighterVisual {
     CLIP_WALK,
     CLIP_RUN,
   ]);
+
+  function beginKnockdown(vx: number, vz: number) {
+    if (ragdollPhase === 'knockdown' || ragdollPhase === 'recover') return;
+    mixer.stopAllAction();
+    currentAction = null;
+    currentActionName = null;
+    attackPlaying = false;
+    jumpLandPlaying = false;
+    ragdoll.enable({ vx, vz });
+    ragdoll.setPoseStrength(0);
+    ragdollPhase = 'knockdown';
+    ragdollElapsed = 0;
+    settleHold = 0;
+    poseBlend = null;
+    blending = false;
+  }
+
+  function beginRecover() {
+    if (ragdollPhase !== 'knockdown') return;
+    const from = captureBonePose(root);
+    if (ragdoll.active) ragdoll.disable();
+    blending = true;
+    poseBlend = createPoseBlend({
+      root,
+      from,
+      to: bindPoseSamples,
+      durationSec: RECOVER_BLEND_SEC,
+    });
+    ragdollPhase = 'recover';
+    poseSnapRequest = true;
+  }
 
   function crossfadeTo(
     name: string,
@@ -241,6 +280,14 @@ function createBunnyVisual(): FighterVisual {
     root,
     isPlaceholder: false,
     ownsRootTransform: () => ragdoll.active || blending,
+    triggerStunRagdoll(impulse) {
+      beginKnockdown(impulse.vx, impulse.vz);
+    },
+    consumePoseSnapRequest() {
+      if (!poseSnapRequest) return false;
+      poseSnapRequest = false;
+      return true;
+    },
     update(f, opts, dt) {
       const tintStrength = opts.holding ? 0.85 : 0.55;
       for (const { mat, baseColor } of tintables) {
@@ -250,20 +297,11 @@ function createBunnyVisual(): FighterVisual {
       }
 
       const stunEnter = f.stunRemaining > 0 && prevStun <= 0;
+      const stunExit = prevStun > 0 && f.stunRemaining <= 0;
 
-      if (stunEnter) {
-        mixer.stopAllAction();
-        currentAction = null;
-        currentActionName = null;
-        attackPlaying = false;
-        jumpLandPlaying = false;
-        ragdoll.enable({ vx: f.vx, vz: f.vz });
-        ragdoll.setPoseStrength(0);
-        ragdollPhase = 'knockdown';
-        ragdollElapsed = 0;
-        settleHold = 0;
-        poseBlend = null;
-        blending = false;
+      // Snapshot fallback (offline / missed event). Event path already sets knockdown.
+      if (stunEnter && ragdollPhase === 'none') {
+        beginKnockdown(f.vx, f.vz);
       }
 
       if (ragdollPhase === 'knockdown' && ragdoll.active) {
@@ -271,18 +309,16 @@ function createBunnyVisual(): FighterVisual {
         ragdollElapsed += dt;
         if (ragdoll.isSettled(0.8, 2.0)) settleHold += dt;
         else settleHold = 0;
-        if (settleHold >= SETTLE_HOLD_SEC || ragdollElapsed >= RAGDOLL_MAX_SEC) {
-          const from = captureBonePose(root);
-          ragdoll.disable();
-          blending = true;
-          poseBlend = createPoseBlend({
-            root,
-            from,
-            to: bindPoseSamples,
-            durationSec: RECOVER_BLEND_SEC,
-          });
-          ragdollPhase = 'recover';
+        if (
+          settleHold >= SETTLE_HOLD_SEC ||
+          ragdollElapsed >= RAGDOLL_MAX_SEC ||
+          stunExit
+        ) {
+          beginRecover();
         }
+      } else if (ragdollPhase === 'knockdown' && stunExit) {
+        // Ragdoll already disabled somehow — still reconverge.
+        beginRecover();
       } else if (ragdollPhase === 'recover' && poseBlend) {
         const done = poseBlend.update(dt);
         if (done) {

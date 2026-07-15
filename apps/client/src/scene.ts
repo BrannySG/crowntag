@@ -38,6 +38,8 @@ export type ArenaScene = {
     camYaw: number,
     dt: number,
   ) => void;
+  /** Soft-network stun juice — starts client ragdoll from wire impulse. */
+  notifyStunEvent: (targetId: string, impulseX: number, impulseZ: number) => void;
   resize: () => void;
   dispose: () => void;
 };
@@ -338,6 +340,15 @@ export function createArenaScene(container: HTMLElement): ArenaScene {
       const tintColor = holding ? 0xf5c542 : colorFor(f, localFighterId);
       entry.visual.update(f, { holding, tintColor }, dt);
 
+      if (entry.visual.consumePoseSnapRequest?.()) {
+        pose.x = target.x;
+        pose.y = target.y;
+        pose.z = target.z;
+        pose.yaw = target.yaw;
+        entry.root.position.set(target.x, target.y, target.z);
+        entry.root.rotation.y = target.yaw;
+      }
+
       if (isLocal) localDisplay = pose;
     }
 
@@ -365,6 +376,11 @@ export function createArenaScene(container: HTMLElement): ArenaScene {
     }
   }
 
+  function notifyStunEvent(targetId: string, impulseX: number, impulseZ: number) {
+    const entry = fighterMeshes.get(targetId);
+    entry?.visual.triggerStunRagdoll?.({ vx: impulseX, vz: impulseZ });
+  }
+
   function resize() {
     const w = container.clientWidth || innerWidth;
     const h = container.clientHeight || innerHeight;
@@ -381,6 +397,7 @@ export function createArenaScene(container: HTMLElement): ArenaScene {
     camera,
     renderer,
     updateFromSnapshot,
+    notifyStunEvent,
     resize,
     dispose: () => {
       disposed = true;

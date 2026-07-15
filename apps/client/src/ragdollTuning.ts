@@ -7,6 +7,7 @@ export type RagdollTuning = {
   maxLinvel: number;
   maxAngvel: number;
   massDensity: number;
+  inertiaScale: number;
   solverIterations: number;
   revoluteLimitMin: number;
   revoluteLimitMax: number;
@@ -37,19 +38,20 @@ export const DEFAULT_RAGDOLL_TUNING: Readonly<RagdollTuning> = Object.freeze({
   maxLinvel: 12,
   maxAngvel: 20,
   massDensity: 80,
+  inertiaScale: 1,
   solverIterations: 8,
   revoluteLimitMin: -2.2,
   revoluteLimitMax: 0.4,
   kpOrient: 40,
   kdOrient: 8,
-  maxTorque: 15,
-  kpHipsUpright: 20,
-  kdHipsUpright: 6,
+  maxTorque: 2,
+  kpHipsUpright: 2,
+  kdHipsUpright: 0.5,
   secondarySpringKp: 25,
   secondarySpringKd: 5,
   torsoConeLimit: 0.7,
   headConeLimit: 0.9,
-  coneClampKp: 30,
+  coneClampKp: 3,
   fixedDt: 1 / 60,
   maxSubsteps: 4,
 });

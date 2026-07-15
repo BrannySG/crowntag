@@ -24,7 +24,14 @@ export type SimCommand =
 export type SimEvent =
   | { type: 'claimed'; fighterId: string }
   | { type: 'stolen'; fromId: string; toId: string }
-  | { type: 'stunned'; fighterId: string; byId: string }
+  | {
+      type: 'stunned';
+      fighterId: string;
+      byId: string;
+      impulseX: number;
+      impulseZ: number;
+      stunRemaining: number;
+    }
   | { type: 'hitMiss'; fighterId: string }
   | { type: 'hitLanded'; attackerId: string; targetId: string };
 

@@ -365,9 +365,9 @@ function simEventToWire(ev: SimEvent): WireEvent | null {
         kind: 'stun',
         targetId: ev.fighterId,
         byId: ev.byId,
-        impulseX: 0,
-        impulseZ: 0,
-        stunRemaining: 0,
+        impulseX: ev.impulseX,
+        impulseZ: ev.impulseZ,
+        stunRemaining: ev.stunRemaining,
       };
     case 'hitLanded':
       return { kind: 'hit', hitterId: ev.attackerId, targetId: ev.targetId };

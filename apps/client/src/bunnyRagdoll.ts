@@ -105,8 +105,7 @@ const PHYSICS_PARTS: PartTopo[] = [
   {
     name: 'armL',
     parent: 'torso',
-    joint: 'revolute',
-    hingeAxis: { x: 1, y: 0, z: 0 },
+    joint: 'spherical',
     massScale: 0.5,
     angularDamping: 3.2,
     radiusMul: 0.16,
@@ -115,8 +114,7 @@ const PHYSICS_PARTS: PartTopo[] = [
   {
     name: 'armR',
     parent: 'torso',
-    joint: 'revolute',
-    hingeAxis: { x: 1, y: 0, z: 0 },
+    joint: 'spherical',
     massScale: 0.5,
     angularDamping: 3.2,
     radiusMul: 0.16,
@@ -322,6 +320,8 @@ type BonePart = {
   /** Mass from density × volume × massScale. */
   mass: number;
   inertia: number;
+  /** Longest joint lever arm from body center (for angular inertia sizing). */
+  leverHalf: number;
 };
 
 type SecondaryPart = {
@@ -342,6 +342,7 @@ const _one = new THREE.Vector3(1, 1, 1);
 const _impulseDir = new THREE.Vector3();
 const _omega = new THREE.Vector3();
 const _bindWorld = new THREE.Vector3();
+const _parentPos = new THREE.Vector3();
 const _childUp = new THREE.Vector3();
 const _parentUp = new THREE.Vector3();
 const _coneAxis = new THREE.Vector3();
@@ -448,6 +449,19 @@ export function createBunnyRagdoll(root: THREE.Object3D): BunnyRagdoll {
     const mass = Math.max(0.05, density * volume * topo.massScale);
     const inertia = approxCapsuleInertia(mass, halfHeight, radius);
 
+    // Longest lever: this body's own extent or the farthest child joint anchor.
+    let leverHalf = halfHeight + radius;
+    const myBind = bindWorldPos.get(topo.name);
+    if (myBind) {
+      for (const other of PHYSICS_PARTS) {
+        if (other.parent !== topo.name) continue;
+        const childBind = bindWorldPos.get(other.name);
+        if (!childBind) continue;
+        const d = myBind.distanceTo(childBind);
+        if (d > leverHalf) leverHalf = d;
+      }
+    }
+
     parts.push({
       topo,
       bone,
@@ -457,6 +471,7 @@ export function createBunnyRagdoll(root: THREE.Object3D): BunnyRagdoll {
       radius,
       mass,
       inertia,
+      leverHalf,
     });
   }
 
@@ -780,10 +795,23 @@ export function createBunnyRagdoll(root: THREE.Object3D): BunnyRagdoll {
 
       root.updateWorldMatrix(true, true);
 
-      // Refresh joint anchors from current local bone offsets so they match spawn pose
-      // (bind-pose cache would mismatch mid-idle bones → violent joint pull).
+      // Joint anchors in parent BODY space (world rotation/scale applied) so they
+      // match the world-space rigid bodies exactly — skeleton-local bone.position
+      // ignores model scale + root yaw and would spawn joints pre-violated.
       for (const p of parts) {
-        p.jointAnchorLocal.copy(p.bone.position);
+        if (!p.topo.parent) {
+          p.jointAnchorLocal.set(0, 0, 0);
+          continue;
+        }
+        const parentPart = partByName.get(p.topo.parent);
+        if (!parentPart) continue;
+        parentPart.bone.getWorldPosition(_parentPos);
+        parentPart.bone.getWorldQuaternion(_qParent);
+        p.bone.getWorldPosition(_pos);
+        p.jointAnchorLocal
+          .copy(_pos)
+          .sub(_parentPos)
+          .applyQuaternion(_qParent.invert());
       }
       for (const s of secondaryParts) {
         s.bindLocalQuat.copy(s.bone.quaternion);
@@ -817,12 +845,23 @@ export function createBunnyRagdoll(root: THREE.Object3D): BunnyRagdoll {
           .setLinearDamping(linearDamping)
           .setAngularDamping(p.topo.angularDamping)
           .setCanSleep(false)
+          .setCcdEnabled(true)
           .setTranslation(_pos.x, _pos.y, _pos.z)
           .setRotation({ x: _quat.x, y: _quat.y, z: _quat.z, w: _quat.w });
 
         const body = world.createRigidBody(desc);
+        // Angular inertia sized to the longest joint lever (not the small capsule) —
+        // default shape inertia is so tiny the joint solver overshoots and pumps energy.
+        const inertia =
+          approxCapsuleInertia(p.mass, p.leverHalf, p.radius) * ragdollTuning.inertiaScale;
+        p.inertia = inertia;
         const collider = RAPIER.ColliderDesc.capsule(p.halfHeight, p.radius)
-          .setMass(p.mass)
+          .setMassProperties(
+            p.mass,
+            { x: 0, y: 0, z: 0 },
+            { x: inertia, y: inertia, z: inertia },
+            { x: 0, y: 0, z: 0, w: 1 },
+          )
           .setCollisionGroups(COLLISION_PART)
           .setSolverGroups(COLLISION_PART);
         world.createCollider(collider, body);
@@ -910,6 +949,12 @@ export function createBunnyRagdoll(root: THREE.Object3D): BunnyRagdoll {
       let steps = 0;
 
       while (accum >= fixedDt && steps < maxSubsteps) {
+        // addTorque is persistent in Rapier — clear last substep's torques or they accumulate.
+        for (const p of parts) {
+          if (!p.body) continue;
+          p.body.resetForces(true);
+          p.body.resetTorques(true);
+        }
         if (poseStrength > 0) poseController.apply(fixedDt);
         applySwingClamps();
         world.timestep = fixedDt;

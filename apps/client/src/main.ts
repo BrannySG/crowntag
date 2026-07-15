@@ -72,6 +72,11 @@ async function tryJoin() {
         if (joinErr) joinErr.textContent = 'Disconnected — refresh to rejoin';
         joinEl?.classList.remove('hidden');
       },
+      onEvent: (event) => {
+        if (event.kind === 'stun') {
+          arena.notifyStunEvent(event.targetId, event.impulseX, event.impulseZ);
+        }
+      },
     });
     joinEl?.classList.add('hidden');
     if (modeLabel) modeLabel.textContent = `Arena ${net.arenaId}`;

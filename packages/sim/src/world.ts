@@ -1148,9 +1148,18 @@ export class World {
         ax /= len;
         az /= len;
       }
-      best.vx += ax * HIT.knockbackStrength;
-      best.vz += az * HIT.knockbackStrength;
-      events.push({ type: 'stunned', fighterId: best.id, byId: attacker.id });
+      const impulseX = ax * HIT.knockbackStrength;
+      const impulseZ = az * HIT.knockbackStrength;
+      best.vx += impulseX;
+      best.vz += impulseZ;
+      events.push({
+        type: 'stunned',
+        fighterId: best.id,
+        byId: attacker.id,
+        impulseX,
+        impulseZ,
+        stunRemaining: best.stunRemaining,
+      });
     }
 
     return events;
