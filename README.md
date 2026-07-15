@@ -1,6 +1,7 @@
 # Crown Tag
 
-Offline-playable graybox **Arena** for Crown Tag — Claim / Steal / Stun / Score in a 48×48 m layout. Packages follow ADR 0001; netcode / Durable Objects come later.
+Real-time multiplayer web arena: Claim / Steal / Stun / Score across a graybox Arena.
+Packages follow ADR 0001; hosted play uses a Cloudflare Worker + Arena Durable Object (ADR 0002).
 
 ## Setup
 
@@ -8,13 +9,42 @@ Offline-playable graybox **Arena** for Crown Tag — Claim / Steal / Stun / Scor
 pnpm install
 ```
 
-## Run (offline arena)
+## Run hosted arena (two local clients)
+
+Build the client, then start Wrangler (serves the client + `/join` + Arena WebSocket):
+
+```bash
+pnpm --filter @crowntag/client build
+pnpm dev:worker
+```
+
+Open **two browser tabs** to http://localhost:8787 — enter different Display Names and Join.
+You should see each other move and be able to Steal the Crown.
+
+### Optional: Vite + Wrangler (HMR)
+
+Terminal 1:
+
+```bash
+pnpm --filter @crowntag/client build
+pnpm dev:worker
+```
+
+Terminal 2 (proxies `/join` and `/arena` to Wrangler):
 
 ```bash
 pnpm dev:client
 ```
 
-Opens the Vite client at http://localhost:5173. Click the canvas to capture the mouse.
+Then open two tabs to http://localhost:5173.
+
+### Offline solo (no Worker)
+
+```bash
+pnpm dev:client
+```
+
+Open http://localhost:5173/?offline=1 — or use “Play offline instead” on the join screen.
 
 ### Controls
 
@@ -25,7 +55,7 @@ Opens the Vite client at http://localhost:5173. Click the canvas to capture the 
 | Shift | Sprint |
 | Space | Jump |
 | Click | Hit (steal crown / stun + knockback) |
-| R | Reset arena |
+| R | Reset arena (**offline only**) |
 
 ### Typecheck
 
@@ -38,23 +68,25 @@ pnpm typecheck
 | Package | Role |
 |---------|------|
 | `@crowntag/content` | Tweakable game data only (no rules logic) |
-| `@crowntag/protocol` | Shared command / event / snapshot types |
+| `@crowntag/protocol` | Shared sim + wire message types |
 | `@crowntag/sim` | Authoritative Arena rules — headless, no DOM/CF APIs |
-| `@crowntag/client` | Three.js presentation (Vite) |
-| `@crowntag/worker` | Cloudflare Worker stub; will host DOs later |
+| `@crowntag/client` | Three.js presentation + prediction |
+| `@crowntag/worker` | Worker, Matchmaker stub, Arena DO, static client assets |
 
 ## Layout
 
 ```
 packages/content    # @crowntag/content — tunables + arena layout
-packages/protocol   # @crowntag/protocol — SimCommand / SimEvent / snapshots
-packages/sim        # @crowntag/sim — World + fixed-timestep step
-apps/client         # Three.js graybox client
-apps/worker         # Wrangler Worker + public assets (stub)
+packages/protocol   # @crowntag/protocol — sim + wire types
+packages/sim        # @crowntag/sim — World + fixed-timestep step (20 Hz)
+apps/client         # Three.js client (join UI + prediction)
+apps/worker         # Wrangler Worker + Arena / Matchmaker DOs
 ```
 
 ## Architecture notes
 
-- **Content** holds ADR 0005 movement/hit baselines and ADR 0003 layout (spawns, obstacles, claim radius).
-- **Sim** `World` is authoritative: movement, hit cone, Claim, Steal, Stun, Knockback, hold-time Score. Deterministic fixed `dt` (`1/60`); no `Math.random`.
-- **Client** gathers input, steps the sim on a fixed accumulator, and renders graybox meshes from content + snapshots. It does not mutate authoritative state except via `SimCommand`s.
+- **Join:** `POST /join` `{ displayName }` → Matchmaker stub always returns `arena-1` + `wsUrl` (full multi-arena Matchmaker is #17).
+- **Arena DO:** Hibernation WebSocket API; authoritative `@crowntag/sim` ticks at **20 Hz** while players are connected; Disconnect returns Crown to Crown Spawn if that Fighter was Holder.
+- **Client:** predicts own movement; reconciles Steal / Stun / Knockback from server snapshots and events.
+- **Content** holds ADR 0005 movement/hit baselines and ADR 0003 layout.
+- **Offline** (`?offline=1`) still runs a local World with dummies — no Worker required.

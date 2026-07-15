@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Crown Tag — Offline Arena</title>
+    <title>Crown Tag</title>
     <style>
       * { box-sizing: border-box; margin: 0; padding: 0; }
       html, body { width: 100%; height: 100%; overflow: hidden; background: #1a1a20; }
@@ -48,18 +48,111 @@
         text-align: right;
         line-height: 1.5;
       }
+      #join {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: radial-gradient(ellipse at center, #2a2a38 0%, #121218 70%);
+        z-index: 10;
+        pointer-events: auto;
+        font-family: ui-monospace, 'Cascadia Code', 'Consolas', monospace;
+      }
+      #join.hidden { display: none; }
+      #join-card {
+        width: min(360px, 92vw);
+        padding: 28px 24px;
+        background: rgba(20, 20, 28, 0.92);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+      }
+      #join-card h1 {
+        font-size: 22px;
+        font-weight: 600;
+        color: #f5c542;
+        margin-bottom: 6px;
+        letter-spacing: 0.04em;
+      }
+      #join-card p {
+        font-size: 13px;
+        color: #9a9aa8;
+        margin-bottom: 20px;
+        line-height: 1.45;
+      }
+      #join-card label {
+        display: block;
+        font-size: 12px;
+        color: #9a9aa8;
+        margin-bottom: 6px;
+      }
+      #display-name {
+        width: 100%;
+        padding: 10px 12px;
+        font: inherit;
+        font-size: 15px;
+        color: #e8e8ef;
+        background: #0e0e14;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        margin-bottom: 14px;
+      }
+      #display-name:focus {
+        outline: none;
+        border-color: #f5c542;
+      }
+      #join-btn {
+        width: 100%;
+        padding: 11px 12px;
+        font: inherit;
+        font-size: 14px;
+        font-weight: 600;
+        color: #121218;
+        background: #f5c542;
+        border: none;
+        cursor: pointer;
+      }
+      #join-btn:disabled {
+        opacity: 0.55;
+        cursor: wait;
+      }
+      #join-btn:hover:not(:disabled) { filter: brightness(1.06); }
+      #join-err {
+        min-height: 1.2em;
+        margin-top: 12px;
+        font-size: 12px;
+        color: #e07a5f;
+      }
+      #offline-link {
+        display: inline-block;
+        margin-top: 16px;
+        font-size: 12px;
+        color: #7a7a88;
+        pointer-events: auto;
+        cursor: pointer;
+        text-decoration: underline;
+      }
     </style>
   </head>
   <body>
     <div id="app"></div>
+    <div id="join">
+      <div id="join-card">
+        <h1>Crown Tag</h1>
+        <p>Enter a Display Name to Join the Arena. Open a second browser tab to play with another client.</p>
+        <label for="display-name">Display Name</label>
+        <input id="display-name" type="text" maxlength="24" placeholder="e.g. CapRunner" autocomplete="off" />
+        <button id="join-btn" type="button">Join Arena</button>
+        <div id="join-err"></div>
+        <a id="offline-link" href="?offline=1">Play offline instead</a>
+      </div>
+    </div>
     <div id="hud">
       <div id="hud-top">
         <div><span class="dim">holder</span> <b id="holder">—</b></div>
         <div><span class="dim">score</span> <span id="score">0.0</span></div>
       </div>
-      <div id="hint">Click to capture mouse · WASD move · Shift sprint · Space jump · Click hit · R reset</div>
+      <div id="hint" class="hidden">Click to capture mouse · WASD move · Shift sprint · Space jump · Click hit</div>
       <div id="controls">
-        Offline arena<br />
+        <span id="mode-label">Hosted arena</span><br />
         Claim by proximity · Steal with Hit
       </div>
     </div>

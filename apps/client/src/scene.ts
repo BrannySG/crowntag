@@ -9,11 +9,18 @@ import type { ArenaSnapshot, FighterSnapshot } from '@crowntag/protocol';
 
 const HALF = ARENA_SIZE / 2;
 
+const PLAYER_COLORS = [0x3d8bfd, 0x5ecf8a, 0xe07a5f, 0xc77dff, 0xf4a261, 0x2a9d8f];
+
 export type ArenaScene = {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   renderer: THREE.WebGLRenderer;
-  updateFromSnapshot: (snap: ArenaSnapshot, camYaw: number, dt: number) => void;
+  updateFromSnapshot: (
+    snap: ArenaSnapshot,
+    localFighterId: string,
+    camYaw: number,
+    dt: number,
+  ) => void;
   resize: () => void;
   dispose: () => void;
 };
@@ -106,7 +113,6 @@ export function createArenaScene(container: HTMLElement): ArenaScene {
     { body: THREE.Mesh; mat: THREE.MeshStandardMaterial; label: THREE.Sprite }
   >();
 
-  const playerMat = new THREE.MeshStandardMaterial({ color: 0x3d8bfd });
   const dummyMats: Record<string, number> = {
     'dummy-1': 0xc44,
     'dummy-2': 0x6a8a6a,
@@ -114,15 +120,22 @@ export function createArenaScene(container: HTMLElement): ArenaScene {
     'dummy-4': 0x8a6a8a,
   };
 
-  function ensureFighter(f: FighterSnapshot) {
+  let colorIdx = 0;
+  const assignedColors = new Map<string, number>();
+
+  function colorFor(f: FighterSnapshot, localId: string): number {
+    if (f.kind === 'dummy') return dummyMats[f.id] ?? 0x888888;
+    if (f.id === localId) return 0x3d8bfd;
+    if (!assignedColors.has(f.id)) {
+      assignedColors.set(f.id, PLAYER_COLORS[colorIdx++ % PLAYER_COLORS.length]!);
+    }
+    return assignedColors.get(f.id)!;
+  }
+
+  function ensureFighter(f: FighterSnapshot, localId: string) {
     let entry = fighterMeshes.get(f.id);
     if (entry) return entry;
-    const color =
-      f.kind === 'player' ? 0x3d8bfd : (dummyMats[f.id] ?? 0x888888);
-    const mat =
-      f.kind === 'player'
-        ? playerMat
-        : new THREE.MeshStandardMaterial({ color });
+    const mat = new THREE.MeshStandardMaterial({ color: colorFor(f, localId) });
     const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.4, 0.9, 4, 8), mat);
     body.castShadow = true;
     scene.add(body);
@@ -133,40 +146,57 @@ export function createArenaScene(container: HTMLElement): ArenaScene {
     return entry;
   }
 
+  function pruneFighters(snap: ArenaSnapshot) {
+    const alive = new Set(snap.fighters.map((f) => f.id));
+    for (const [id, entry] of fighterMeshes) {
+      if (alive.has(id)) continue;
+      scene.remove(entry.body);
+      scene.remove(entry.label);
+      entry.body.geometry.dispose();
+      entry.mat.dispose();
+      fighterMeshes.delete(id);
+      assignedColors.delete(id);
+    }
+  }
+
   const camOffset = new THREE.Vector3(0, 4.5, 7.5);
   const camLook = new THREE.Vector3();
   const desiredCam = new THREE.Vector3();
 
-  function updateFromSnapshot(snap: ArenaSnapshot, camYaw: number, dt: number) {
-    const player = snap.fighters.find((f) => f.id === 'player');
+  function updateFromSnapshot(
+    snap: ArenaSnapshot,
+    localFighterId: string,
+    camYaw: number,
+    dt: number,
+  ) {
+    pruneFighters(snap);
+    const local = snap.fighters.find((f) => f.id === localFighterId);
 
     for (const f of snap.fighters) {
-      const entry = ensureFighter(f);
+      const entry = ensureFighter(f, localFighterId);
       entry.body.position.set(f.x, 0.9 + f.y, f.z);
       entry.body.rotation.y = f.yaw;
       entry.label.position.set(f.x, 2.05 + f.y, f.z);
-      if (f.kind === 'player') {
-        entry.mat.color.setHex(snap.crown.holderId === 'player' ? 0xf5c542 : 0x3d8bfd);
-      } else {
-        const mat = entry.mat;
-        if (f.stunRemaining > 0) mat.emissive?.setHex(0x442200);
-        else mat.emissive?.setHex(0x000000);
-      }
+      const holding = snap.crown.holderId === f.id;
+      if (holding) entry.mat.color.setHex(0xf5c542);
+      else entry.mat.color.setHex(colorFor(f, localFighterId));
+      if (f.stunRemaining > 0) entry.mat.emissive.setHex(0x442200);
+      else entry.mat.emissive.setHex(0x000000);
     }
 
     crown.position.set(snap.crown.x, snap.crown.y, snap.crown.z);
     crown.rotation.y += dt * 2.5;
 
-    if (player) {
+    if (local) {
       const backX = Math.sin(camYaw);
       const backZ = Math.cos(camYaw);
       desiredCam.set(
-        player.x + backX * camOffset.z,
-        player.y + camOffset.y,
-        player.z + backZ * camOffset.z,
+        local.x + backX * camOffset.z,
+        local.y + camOffset.y,
+        local.z + backZ * camOffset.z,
       );
       camera.position.lerp(desiredCam, 1 - Math.pow(0.0002, dt));
-      camLook.set(player.x, player.y + 1.2, player.z);
+      camLook.set(local.x, local.y + 1.2, local.z);
       camera.lookAt(camLook);
     }
   }
@@ -206,7 +236,7 @@ function makeLabel(text: string): THREE.Sprite {
   ctx.fillStyle = '#eee';
   ctx.font = '16px monospace';
   ctx.textAlign = 'center';
-  ctx.fillText(text, 64, 22);
+  ctx.fillText(text.slice(0, 16), 64, 22);
   const tex = new THREE.CanvasTexture(canvas);
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true }));
   sprite.scale.set(1.6, 0.4, 1);

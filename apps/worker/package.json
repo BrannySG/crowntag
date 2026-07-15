@@ -8,6 +8,11 @@
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "@crowntag/content": "workspace:*",
+    "@crowntag/protocol": "workspace:*",
+    "@crowntag/sim": "workspace:*"
+  },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241218.0",
     "typescript": "^5.7.3",

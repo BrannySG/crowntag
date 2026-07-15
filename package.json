@@ -2,8 +2,9 @@
   "name": "crowntag",
   "private": true,
   "scripts": {
-    "dev:worker": "pnpm --filter @crowntag/worker dev",
+    "dev:worker": "pnpm --filter @crowntag/client build && pnpm --filter @crowntag/worker dev",
     "dev:client": "pnpm --filter @crowntag/client dev",
+    "build:client": "pnpm --filter @crowntag/client build",
     "typecheck": "pnpm -r run typecheck"
   },
   "packageManager": "pnpm@9.15.0"

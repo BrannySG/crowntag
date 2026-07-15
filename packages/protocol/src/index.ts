@@ -2,6 +2,7 @@
 export type Vec2 = { x: number; z: number };
 export type Vec3 = { x: number; y: number; z: number };
 
+/** Local sim / prediction input (camera-relative axes + look yaw). */
 export type FighterInput = {
   /** +1 forward / -1 back in camera/look space */
   forward: number;
@@ -27,9 +28,11 @@ export type SimEvent =
   | { type: 'hitMiss'; fighterId: string }
   | { type: 'hitLanded'; attackerId: string; targetId: string };
 
+export type FighterKind = 'player' | 'bot' | 'dummy';
+
 export type FighterSnapshot = {
   id: string;
-  kind: 'player' | 'dummy';
+  kind: FighterKind;
   displayName: string;
   x: number;
   y: number;
@@ -42,6 +45,8 @@ export type FighterSnapshot = {
   stunRemaining: number;
   hitCooldownRemaining: number;
   score: number;
+  /** Last input seq consumed by authority for this Fighter (players). */
+  lastInputSeq: number;
 };
 
 export type CrownSnapshot = {
@@ -59,5 +64,98 @@ export type ArenaSnapshot = {
   crown: CrownSnapshot;
 };
 
-/** Compatibility stub for early worker scaffolding (unused by offline arena). */
+// --- Wire protocol (ADR 0002 / docs/protocol/v1-wire-sketch.md) ---
+
+export type JoinRequest = {
+  displayName: string;
+};
+
+export type JoinResponse = {
+  arenaId: string;
+  wsUrl: string;
+};
+
+/** Client → Arena. `moveX`/`moveZ` are strafe / forward (normalized by sim). */
+export type InputMessage = {
+  type: 'input';
+  seq: number;
+  moveX: number;
+  moveZ: number;
+  yaw: number;
+  jump: boolean;
+  sprint: boolean;
+  hit: boolean;
+};
+
+export type ClientMessage = InputMessage;
+
+export type WelcomeMessage = {
+  type: 'welcome';
+  fighterId: string;
+  arenaId: string;
+  tick: number;
+  contentRevision: string;
+};
+
+export type SnapshotMessage = {
+  type: 'snapshot';
+  tick: number;
+  time: number;
+  crown: CrownSnapshot;
+  fighters: FighterSnapshot[];
+};
+
+export type WireEventKind = 'join' | 'leave' | 'claim' | 'hit' | 'steal' | 'stun';
+
+export type WireEvent =
+  | { kind: 'join'; fighterId: string; displayName: string }
+  | { kind: 'leave'; fighterId: string }
+  | { kind: 'claim'; fighterId: string }
+  | { kind: 'hit'; hitterId: string; targetId: string }
+  | { kind: 'steal'; fromId: string; toId: string }
+  | {
+      kind: 'stun';
+      targetId: string;
+      byId: string;
+      impulseX: number;
+      impulseZ: number;
+      stunRemaining: number;
+    };
+
+export type EventMessage = {
+  type: 'event';
+  tick: number;
+  event: WireEvent;
+};
+
+export type ServerMessage = WelcomeMessage | SnapshotMessage | EventMessage;
+
+/** @deprecated early scaffolding; prefer ClientMessage / ServerMessage */
 export type StubMessage = { type: 'ping' } | { type: 'pong' };
+
+export function inputMessageToFighterInput(msg: InputMessage): FighterInput {
+  return {
+    forward: msg.moveZ,
+    strafe: msg.moveX,
+    yaw: msg.yaw,
+    sprint: msg.sprint,
+    jump: msg.jump,
+    hit: msg.hit,
+  };
+}
+
+export function fighterInputToInputMessage(
+  seq: number,
+  input: FighterInput,
+): InputMessage {
+  return {
+    type: 'input',
+    seq,
+    moveX: input.strafe,
+    moveZ: input.forward,
+    yaw: input.yaw,
+    jump: input.jump,
+    sprint: input.sprint,
+    hit: input.hit,
+  };
+}

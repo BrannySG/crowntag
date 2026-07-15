@@ -6,7 +6,17 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   root: '.',
-  server: { port: 5173 },
+  server: {
+    port: 5173,
+    proxy: {
+      '/join': { target: 'http://127.0.0.1:8787', changeOrigin: true },
+      '/arena': { target: 'http://127.0.0.1:8787', ws: true, changeOrigin: true },
+    },
+  },
+  build: {
+    outDir: 'dist',
+    emptyOutDir: true,
+  },
   resolve: {
     alias: {
       '@crowntag/content': path.resolve(__dirname, '../../packages/content/src/index.ts'),

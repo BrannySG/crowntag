@@ -1,5 +1,11 @@
+/** Bumped when tweakable content that clients must agree on changes. */
+export const CONTENT_REVISION = '1';
+
 /** Default Cap for an Arena (ADR domain). */
 export const CAP = 12;
+
+/** Authoritative / predicted tick rate (ADR 0002). */
+export const TICK_HZ = 20;
 
 /** ADR 0005 movement baselines. */
 export const MOVEMENT = {

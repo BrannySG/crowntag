@@ -25,7 +25,7 @@ export function createInput(canvas: HTMLElement): InputController {
   const state: ClientInputState = {
     forward: 0,
     strafe: 0,
-    yaw: Math.PI,
+    yaw: 0,
     sprint: false,
     jump: false,
     hitQueued: false,

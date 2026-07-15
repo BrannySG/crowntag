@@ -9,19 +9,19 @@ import {
   PHYSICS,
   PLAYER_SPAWN_INDEX,
   SCORE_PER_SECOND,
+  TICK_HZ,
 } from '@crowntag/content';
 import type {
   ArenaSnapshot,
   FighterInput,
+  FighterKind,
   FighterSnapshot,
   SimCommand,
   SimEvent,
 } from '@crowntag/protocol';
 
-/** Fixed sim timestep. Client should accumulate and call `step()` at this rate. */
-export const FIXED_DT = 1 / 60;
-
-type FighterKind = 'player' | 'dummy';
+/** Fixed sim timestep (ADR 0002 — 20 Hz). */
+export const FIXED_DT = 1 / TICK_HZ;
 
 type DummyPatrol = {
   /** Deterministic phase seed (no Math.random). */
@@ -51,6 +51,7 @@ type FighterState = {
   score: number;
   radius: number;
   input: FighterInput;
+  lastInputSeq: number;
   dummy?: DummyPatrol;
 };
 
@@ -93,9 +94,11 @@ function resolveObstacles(f: FighterState): void {
   }
 }
 
+export type WorldMode = 'offline' | 'arena';
+
 /**
- * Authoritative offline Arena world: 1 player + deterministic dummies.
- * Headless — no DOM, Three.js, Cloudflare, timers, or Math.random.
+ * Authoritative Arena world — headless: no DOM, Three.js, Cloudflare, timers, or Math.random.
+ * Offline mode seeds one player + dummies; arena mode starts empty and uses add/remove Fighter.
  */
 export class World {
   private tick = 0;
@@ -103,9 +106,21 @@ export class World {
   private fighters: FighterState[] = [];
   private holderId: string | null = null;
   private pendingInputs = new Map<string, FighterInput>();
+  private pendingSeqs = new Map<string, number>();
+  private nextSpawnIndex = 0;
+  private readonly mode: WorldMode;
 
-  constructor() {
+  constructor(mode: WorldMode = 'offline') {
+    this.mode = mode;
     this.resetState();
+  }
+
+  getTick(): number {
+    return this.tick;
+  }
+
+  getFighterCount(): number {
+    return this.fighters.length;
   }
 
   send(cmd: SimCommand): void {
@@ -118,9 +133,105 @@ export class World {
     }
   }
 
+  /** Apply sequenced input (Arena DO / prediction). Higher seq wins for the tick. */
+  setInputWithSeq(fighterId: string, seq: number, input: FighterInput): void {
+    const f = this.fighters.find((x) => x.id === fighterId);
+    if (!f) return;
+    const prev = this.pendingSeqs.get(fighterId) ?? f.lastInputSeq;
+    if (seq < prev) return;
+    this.pendingSeqs.set(fighterId, seq);
+    this.pendingInputs.set(fighterId, { ...input });
+  }
+
+  /**
+   * Add a human Player at the next Fighter Spawn.
+   * Returns false if Cap would be exceeded (caller should reject join).
+   */
+  addPlayer(id: string, displayName: string, spawnIndex?: number): boolean {
+    if (this.fighters.some((f) => f.id === id)) return false;
+    const idx =
+      spawnIndex !== undefined
+        ? spawnIndex % FIGHTER_SPAWNS.length
+        : this.nextSpawnIndex++ % FIGHTER_SPAWNS.length;
+    const spawn = FIGHTER_SPAWNS[idx]!;
+    // Face Crown Spawn (origin): forward (-sin yaw, -cos yaw) points inward.
+    const yaw = Math.atan2(spawn.x, spawn.z);
+    this.fighters.push({
+      id,
+      kind: 'player',
+      displayName,
+      x: spawn.x,
+      y: 0,
+      z: spawn.z,
+      yaw,
+      vx: 0,
+      vy: 0,
+      vz: 0,
+      onGround: true,
+      stunRemaining: 0,
+      hitCooldownRemaining: 0,
+      score: 0,
+      radius: PHYSICS.playerRadius,
+      input: { ...EMPTY_INPUT, yaw },
+      lastInputSeq: 0,
+    });
+    return true;
+  }
+
+  /**
+   * Disconnect / leave. If the Fighter was Holder, Crown returns to Crown Spawn.
+   * Returns true if a Fighter was removed.
+   */
+  removeFighter(id: string): boolean {
+    const idx = this.fighters.findIndex((f) => f.id === id);
+    if (idx < 0) return false;
+    if (this.holderId === id) this.holderId = null;
+    this.fighters.splice(idx, 1);
+    this.pendingInputs.delete(id);
+    this.pendingSeqs.delete(id);
+    return true;
+  }
+
+  /**
+   * Replace world state from an authoritative snapshot (client reconcile).
+   * Dummies/bots keep kind from snapshot; offline dummies are restored as `dummy`.
+   */
+  applySnapshot(snap: ArenaSnapshot): void {
+    this.tick = snap.tick;
+    this.time = snap.time;
+    this.holderId = snap.crown.holderId;
+    this.pendingInputs.clear();
+    this.pendingSeqs.clear();
+
+    const prev = new Map(this.fighters.map((f) => [f.id, f]));
+    this.fighters = snap.fighters.map((s) => {
+      const old = prev.get(s.id);
+      return {
+        id: s.id,
+        kind: s.kind,
+        displayName: s.displayName,
+        x: s.x,
+        y: s.y,
+        z: s.z,
+        yaw: s.yaw,
+        vx: s.vx,
+        vy: s.vy,
+        vz: s.vz,
+        onGround: s.onGround,
+        stunRemaining: s.stunRemaining,
+        hitCooldownRemaining: s.hitCooldownRemaining,
+        score: s.score,
+        radius:
+          s.kind === 'dummy' ? PHYSICS.dummyRadius : PHYSICS.playerRadius,
+        input: old ? { ...old.input } : { ...EMPTY_INPUT, yaw: s.yaw },
+        lastInputSeq: s.lastInputSeq,
+        dummy: old?.dummy,
+      };
+    });
+  }
+
   /**
    * Advance one fixed tick. Variable `dt` is ignored — always uses FIXED_DT.
-   * Client should use an accumulator and call `step()` once per FIXED_DT.
    */
   step(_dt?: number): SimEvent[] {
     const dt = FIXED_DT;
@@ -128,10 +239,14 @@ export class World {
 
     for (const [id, input] of this.pendingInputs) {
       const f = this.fighters.find((x) => x.id === id);
-      if (f) f.input = { ...input };
+      if (f) {
+        f.input = { ...input };
+        const seq = this.pendingSeqs.get(id);
+        if (seq !== undefined) f.lastInputSeq = seq;
+      }
     }
-    // Consume one-shot hit flags after applying this tick's inputs
     this.pendingInputs.clear();
+    this.pendingSeqs.clear();
 
     for (const f of this.fighters) {
       f.hitCooldownRemaining = Math.max(0, f.hitCooldownRemaining - dt);
@@ -144,7 +259,7 @@ export class World {
     }
 
     for (const f of this.fighters) {
-      if (f.kind === 'player' && f.input.hit) {
+      if (f.kind !== 'dummy' && f.input.hit) {
         events.push(...this.resolveHit(f));
         f.input.hit = false;
       }
@@ -178,6 +293,7 @@ export class World {
       stunRemaining: f.stunRemaining,
       hitCooldownRemaining: f.hitCooldownRemaining,
       score: f.score,
+      lastInputSeq: f.lastInputSeq,
     }));
 
     let cx = CROWN_SPAWN.x;
@@ -210,9 +326,16 @@ export class World {
     this.time = 0;
     this.holderId = null;
     this.pendingInputs.clear();
+    this.pendingSeqs.clear();
+    this.nextSpawnIndex = 0;
+
+    if (this.mode === 'arena') {
+      this.fighters = [];
+      return;
+    }
 
     const spawn = FIGHTER_SPAWNS[PLAYER_SPAWN_INDEX]!;
-    const playerYaw = Math.PI; // face toward center from south
+    const playerYaw = Math.atan2(spawn.x, spawn.z);
 
     this.fighters = [
       {
@@ -232,6 +355,7 @@ export class World {
         score: 0,
         radius: PHYSICS.playerRadius,
         input: { ...EMPTY_INPUT, yaw: playerYaw },
+        lastInputSeq: 0,
       },
       this.makeDummy('dummy-1', 'NearCrown', 3.5, 2.5, {
         phase: 0.4,
@@ -280,6 +404,7 @@ export class World {
       score: 0,
       radius: PHYSICS.dummyRadius,
       input: { ...EMPTY_INPUT },
+      lastInputSeq: 0,
       dummy: {
         phase: opts.phase,
         homeX: x,
@@ -355,7 +480,6 @@ export class World {
       if (d.moving) {
         const isHolder = this.holderId === f.id;
         if (d.nearCrown) {
-          // Orbit near pedestal so Claim is reachable for Steal testing
           d.phase += dt * (isHolder ? 0.35 : 0.55);
           const radius = isHolder ? 1.2 : 1.6;
           const tx = Math.cos(d.phase) * radius;
@@ -474,5 +598,9 @@ export class World {
 }
 
 export function createOfflineWorld(): World {
-  return new World();
+  return new World('offline');
+}
+
+export function createArenaWorld(): World {
+  return new World('arena');
 }
