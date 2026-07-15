@@ -12,6 +12,12 @@ import type {
 } from '@crowntag/protocol';
 import { inputMessageToFighterInput } from '@crowntag/protocol';
 import { createArenaWorld, World } from '@crowntag/sim';
+import {
+  type ArenaOccupancy,
+  releaseJoinSlot,
+  reserveJoinSlot,
+  setArenaOccupancy,
+} from './matchmaking';
 
 export interface Env {
   ASSETS: Fetcher;
@@ -19,25 +25,37 @@ export interface Env {
   MATCHMAKER: DurableObjectNamespace;
 }
 
-/** Single named arena for ticket #15 (full Matchmaker is #17). */
-const SOLO_ARENA_ID = 'arena-1';
-
 type Attachment = {
   fighterId: string;
   displayName: string;
 };
 
 const TICK_MS = 1000 / TICK_HZ;
+const MATCHMAKER_NAME = 'global';
+const ARENAS_KEY = 'arenas';
+const NEXT_SEQ_KEY = 'nextArenaSeq';
 
 /**
- * Stub Matchmaker: always routes Join to the solo Arena.
- * Occupancy bookkeeping for parallel rooms lands in #17.
+ * Singleton Matchmaker: fullest non-full Arena, else create.
+ * Occupancy is reserved on Join and corrected by Arena reports / Cap rejects.
  */
 export class Matchmaker extends DurableObject<Env> {
   async fetch(request: Request): Promise<Response> {
-    if (request.method !== 'POST') {
-      return new Response('Method not allowed', { status: 405 });
+    const url = new URL(request.url);
+
+    if (request.method === 'POST' && url.pathname === '/occupancy') {
+      return this.handleOccupancy(request);
     }
+    if (request.method === 'POST' && url.pathname === '/release') {
+      return this.handleRelease(request);
+    }
+    if (request.method === 'POST') {
+      return this.handleJoin(request);
+    }
+    return new Response('Method not allowed', { status: 405 });
+  }
+
+  private async handleJoin(request: Request): Promise<Response> {
     let body: JoinRequest;
     try {
       body = (await request.json()) as JoinRequest;
@@ -49,16 +67,65 @@ export class Matchmaker extends DurableObject<Env> {
       return Response.json({ error: 'display_name_required' }, { status: 400 });
     }
 
+    const arenas = (await this.ctx.storage.get<ArenaOccupancy[]>(ARENAS_KEY)) ?? [];
+    const nextSeq = (await this.ctx.storage.get<number>(NEXT_SEQ_KEY)) ?? 1;
+    const reserved = reserveJoinSlot(arenas, nextSeq, CAP);
+    await this.ctx.storage.put({
+      [ARENAS_KEY]: reserved.arenas,
+      [NEXT_SEQ_KEY]: reserved.nextSeq,
+    });
+
     const url = new URL(request.url);
-    const wsUrl = `${url.protocol === 'https:' ? 'wss' : 'ws'}://${url.host}/arena/${SOLO_ARENA_ID}?name=${encodeURIComponent(displayName)}`;
-    const res: JoinResponse = { arenaId: SOLO_ARENA_ID, wsUrl };
+    const wsUrl = `${url.protocol === 'https:' ? 'wss' : 'ws'}://${url.host}/arena/${reserved.arenaId}?name=${encodeURIComponent(displayName)}`;
+    const res: JoinResponse = { arenaId: reserved.arenaId, wsUrl };
     return Response.json(res);
+  }
+
+  private async handleOccupancy(request: Request): Promise<Response> {
+    let body: { arenaId?: string; fighterCount?: number };
+    try {
+      body = (await request.json()) as { arenaId?: string; fighterCount?: number };
+    } catch {
+      return Response.json({ error: 'invalid_json' }, { status: 400 });
+    }
+    const arenaId = (body.arenaId ?? '').trim();
+    if (!arenaId || typeof body.fighterCount !== 'number') {
+      return Response.json({ error: 'invalid_occupancy' }, { status: 400 });
+    }
+
+    const arenas = (await this.ctx.storage.get<ArenaOccupancy[]>(ARENAS_KEY)) ?? [];
+    const nextSeq = (await this.ctx.storage.get<number>(NEXT_SEQ_KEY)) ?? 1;
+    const next = setArenaOccupancy(arenas, arenaId, body.fighterCount, nextSeq);
+    await this.ctx.storage.put({
+      [ARENAS_KEY]: next.arenas,
+      [NEXT_SEQ_KEY]: next.nextSeq,
+    });
+    return Response.json({ ok: true });
+  }
+
+  private async handleRelease(request: Request): Promise<Response> {
+    let body: { arenaId?: string };
+    try {
+      body = (await request.json()) as { arenaId?: string };
+    } catch {
+      return Response.json({ error: 'invalid_json' }, { status: 400 });
+    }
+    const arenaId = (body.arenaId ?? '').trim();
+    if (!arenaId) {
+      return Response.json({ error: 'arena_id_required' }, { status: 400 });
+    }
+
+    const arenas = (await this.ctx.storage.get<ArenaOccupancy[]>(ARENAS_KEY)) ?? [];
+    const next = releaseJoinSlot(arenas, arenaId);
+    await this.ctx.storage.put(ARENAS_KEY, next);
+    return Response.json({ ok: true });
   }
 }
 
 /**
  * Authoritative Arena: Hibernation WebSocket API + 20 Hz sim tick while occupied.
  * Bots fill toward Cap while ≥1 human is present (ADR 0004).
+ * Cap enforced here as well as in Matchmaker (race: despawn Bot or reject + /release).
  */
 export class Arena extends DurableObject<Env> {
   private world: World = createArenaWorld();
@@ -83,6 +150,45 @@ export class Arena extends DurableObject<Env> {
     });
   }
 
+  private arenaId(): string {
+    return this.ctx.id.name ?? 'arena-unknown';
+  }
+
+  private matchmaker(): DurableObjectStub {
+    return this.env.MATCHMAKER.getByName(MATCHMAKER_NAME);
+  }
+
+  private async reportOccupancy(): Promise<void> {
+    try {
+      await this.matchmaker().fetch(
+        new Request('https://matchmaker/occupancy', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            arenaId: this.arenaId(),
+            fighterCount: this.world.getFighterCount(),
+          }),
+        }),
+      );
+    } catch {
+      // Matchmaker sync is best-effort; Arena Cap remains authoritative.
+    }
+  }
+
+  private async releaseReservedSlot(): Promise<void> {
+    try {
+      await this.matchmaker().fetch(
+        new Request('https://matchmaker/release', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ arenaId: this.arenaId() }),
+        }),
+      );
+    } catch {
+      // ignore
+    }
+  }
+
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
@@ -92,8 +198,10 @@ export class Arena extends DurableObject<Env> {
     const displayName = (url.searchParams.get('name') ?? 'Player').trim().slice(0, 24) || 'Player';
 
     // Cap includes Bots: despawn a Bot to free a slot when full (ADR 0004).
+    // If still full, release Matchmaker reservation (Cap race).
     if (this.world.getFighterCount() >= CAP) {
       if (!this.world.despawnBotForPlayerJoin()) {
+        await this.releaseReservedSlot();
         return new Response('Arena full', { status: 503 });
       }
     }
@@ -105,6 +213,7 @@ export class Arena extends DurableObject<Env> {
     this.fighterSeq += 1;
     const fighterId = `p-${this.fighterSeq}`;
     if (!this.world.addPlayer(fighterId, displayName)) {
+      await this.releaseReservedSlot();
       return new Response('Arena full', { status: 503 });
     }
 
@@ -114,11 +223,12 @@ export class Arena extends DurableObject<Env> {
 
     this.world.fillBotsTowardCap(CAP);
     this.ensureTicking();
+    await this.reportOccupancy();
 
     const welcome: ServerMessage = {
       type: 'welcome',
       fighterId,
-      arenaId: this.ctx.id.name ?? SOLO_ARENA_ID,
+      arenaId: this.arenaId(),
       tick: this.world.getTick(),
       contentRevision: CONTENT_REVISION,
     };
@@ -177,6 +287,7 @@ export class Arena extends DurableObject<Env> {
         this.world.fillBotsTowardCap(CAP);
       }
       this.broadcastSnapshot();
+      void this.reportOccupancy();
     }
     this.maybeStopTicking();
   }
@@ -269,16 +380,14 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname === '/join' && request.method === 'POST') {
-      const id = env.MATCHMAKER.idFromName('global');
-      const stub = env.MATCHMAKER.get(id);
+      const stub = env.MATCHMAKER.getByName(MATCHMAKER_NAME);
       return stub.fetch(request);
     }
 
     const arenaMatch = url.pathname.match(/^\/arena\/([^/]+)$/);
     if (arenaMatch) {
       const arenaId = decodeURIComponent(arenaMatch[1]!);
-      const id = env.ARENA.idFromName(arenaId);
-      const stub = env.ARENA.get(id);
+      const stub = env.ARENA.getByName(arenaId);
       return stub.fetch(request);
     }
 
