@@ -9,6 +9,31 @@ Packages follow ADR 0001; hosted play uses a Cloudflare Worker + Arena Durable O
 pnpm install
 ```
 
+## Deploy
+
+Build client assets and deploy the Worker (serves `apps/client/dist` + `/join` + Arena WebSocket on Cloudflare):
+
+```bash
+pnpm deploy
+```
+
+Or build and deploy separately:
+
+```bash
+pnpm --filter @crowntag/client build
+pnpm --filter @crowntag/worker run deploy
+```
+
+If Wrangler is not authenticated:
+
+```bash
+pnpm --filter @crowntag/worker exec wrangler login
+```
+
+### Live URL
+
+https://crowntag.branny.workers.dev
+
 ## Run hosted arena (two local clients)
 
 Build the client, then start Wrangler (serves the client + `/join` + Arena WebSocket):

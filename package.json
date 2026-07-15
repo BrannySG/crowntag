@@ -5,6 +5,7 @@
     "dev:worker": "pnpm --filter @crowntag/client build && pnpm --filter @crowntag/worker dev",
     "dev:client": "pnpm --filter @crowntag/client dev",
     "build:client": "pnpm --filter @crowntag/client build",
+    "deploy": "pnpm --filter @crowntag/client build && pnpm --filter @crowntag/worker run deploy",
     "typecheck": "pnpm -r run typecheck"
   },
   "packageManager": "pnpm@9.15.0"
