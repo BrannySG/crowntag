@@ -1,0 +1,3 @@
+# V1 bot fill, despawn, and chase
+
+V1 Bots live in `@crowntag/sim` and count toward **Cap**. While an Arena has ≥1 human Player, the server **fills to Cap** with Bots; when a Player Joins and the Arena is full, **despawn a Bot** (prefer non-Holder, then lowest Score) to free the slot. When the last Player Disconnects, despawn remaining Bots and allow the Arena DO to idle/hibernate. Chase AI is deliberately dumb: if no Holder, path to **Crown Spawn** and **Claim**; if someone else Holds, steer toward the Holder and **Hit** in range; if self is Holder, flee the nearest pursuing Fighter. Display Names come from a curated `@crowntag/content` name list (human-like, no `Bot###`); Bots appear on the **Leaderboard**. Near-human jukes/prediction stay out of scope.

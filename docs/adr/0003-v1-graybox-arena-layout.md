@@ -1,0 +1,3 @@
+# V1 graybox arena layout
+
+V1 ships **one handcrafted graybox Arena** layout (all parallel rooms reuse it). Playable floor is a **48×48 m** square with **3 m** perimeter walls. **Crown Spawn** is a low center pedestal; an unheld Crown sits there and is **Claim**ed by proximity. **Fighter Spawn**s are **eight** perimeter points (cardinals + diagonals), each ≥ **15 m** from Crown Spawn so Join does not instant-Claim. Obstacle vocabulary is graybox only: waist-high **boxes**, short **wall segments**, and a loose ring of low **pillars** around the pedestal for peek cover — **single elevation** (no multi-level). Exact sizes, Claim radius, and mesh transforms live in `@crowntag/content` and stay tweakable; this ADR locks the layout intent for the playable-scope spec.
