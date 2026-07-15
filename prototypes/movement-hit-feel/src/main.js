@@ -65,10 +65,6 @@ floor.rotation.x = -Math.PI / 2;
 floor.receiveShadow = true;
 scene.add(floor);
 
-const grid = new THREE.GridHelper(ARENA, 24, 0x666670, 0x3a3a42);
-grid.position.y = 0.01;
-scene.add(grid);
-
 // Perimeter walls (3 m, ADR 0003)
 const wallMat = new THREE.MeshStandardMaterial({ color: 0x5a5a64, roughness: 0.9 });
 function addWall(w, h, d, x, y, z) {
@@ -208,11 +204,15 @@ let crownHolder = 'Holder';
 const player = {
   pos: new THREE.Vector3(0, 0, 14),
   vel: new THREE.Vector3(),
-  yaw: Math.PI, // face toward center
+  yaw: Math.PI, // face toward center (-Z camera behind → look + toward origin)
   onGround: true,
   stunT: 0,
   hitCd: 0,
 };
+
+/** Camera yaw (radians). WASD is relative to this — not world axes. */
+let camYaw = Math.PI;
+const LOOK_SENS = 0.0022;
 
 // ---------------------------------------------------------------------------
 // Input
@@ -226,8 +226,20 @@ addEventListener('keydown', (e) => {
 addEventListener('keyup', (e) => keys.delete(e.code));
 addEventListener('blur', () => keys.clear());
 
+renderer.domElement.addEventListener('click', () => {
+  if (document.pointerLockElement !== renderer.domElement) {
+    renderer.domElement.requestPointerLock();
+  }
+});
+
+document.addEventListener('mousemove', (e) => {
+  if (document.pointerLockElement !== renderer.domElement) return;
+  camYaw -= e.movementX * LOOK_SENS;
+  player.yaw = camYaw;
+});
+
 renderer.domElement.addEventListener('pointerdown', (e) => {
-  if (e.button === 0) tryHit();
+  if (e.button === 0 && document.pointerLockElement === renderer.domElement) tryHit();
 });
 
 addEventListener('resize', () => {
@@ -282,6 +294,7 @@ function resetArena() {
   player.pos.set(0, 0, 14);
   player.vel.set(0, 0, 0);
   player.yaw = Math.PI;
+  camYaw = Math.PI;
   player.stunT = 0;
   player.hitCd = 0;
   player.onGround = true;
@@ -422,27 +435,33 @@ function update(dt) {
   player.stunT = Math.max(0, player.stunT - dt);
   HIT_FLASH.material.opacity = Math.max(0, HIT_FLASH.material.opacity - dt * 3);
 
-  // Player movement
+  // Player movement — camera-relative free move (not world axes / not grid)
   const stunned = player.stunT > 0;
-  let ix = 0;
-  let iz = 0;
+  let inputF = 0; // forward (+W)
+  let inputR = 0; // strafe right (+D)
   if (!stunned) {
-    if (keys.has('KeyW') || keys.has('ArrowUp')) iz -= 1;
-    if (keys.has('KeyS') || keys.has('ArrowDown')) iz += 1;
-    if (keys.has('KeyA') || keys.has('ArrowLeft')) ix -= 1;
-    if (keys.has('KeyD') || keys.has('ArrowRight')) ix += 1;
+    if (keys.has('KeyW') || keys.has('ArrowUp')) inputF += 1;
+    if (keys.has('KeyS') || keys.has('ArrowDown')) inputF -= 1;
+    if (keys.has('KeyD') || keys.has('ArrowRight')) inputR += 1;
+    if (keys.has('KeyA') || keys.has('ArrowLeft')) inputR -= 1;
   }
   const sprinting = !stunned && (keys.has('ShiftLeft') || keys.has('ShiftRight'));
   const speed = T.moveSpeed * (sprinting ? T.sprintMult : 1);
 
-  if (ix !== 0 || iz !== 0) {
-    const len = Math.hypot(ix, iz);
-    ix /= len;
-    iz /= len;
-    // World-relative WASD (W=-Z, D=+X); face move dir so hit cone tracks intent
-    player.vel.x = ix * speed;
-    player.vel.z = iz * speed;
-    player.yaw = Math.atan2(-ix, -iz);
+  // Keep body aligned with look (hit cone = where you're looking)
+  player.yaw = camYaw;
+
+  if (inputF !== 0 || inputR !== 0) {
+    const len = Math.hypot(inputF, inputR);
+    inputF /= len;
+    inputR /= len;
+    // Camera forward / right on XZ (matches facingArrow + hit cone)
+    const fx = -Math.sin(camYaw);
+    const fz = -Math.cos(camYaw);
+    const rx = Math.cos(camYaw);
+    const rz = -Math.sin(camYaw);
+    player.vel.x = (fx * inputF + rx * inputR) * speed;
+    player.vel.z = (fz * inputF + rz * inputR) * speed;
   } else {
     // ground friction on horizontal
     if (player.onGround) {
@@ -539,14 +558,15 @@ function update(dt) {
   // Tint player when holding
   playerMat.color.setHex(crownHolder === 'player' ? 0xf5c542 : 0x3d8bfd);
 
-  // Third-person camera behind player
-  const back = new THREE.Vector3(Math.sin(player.yaw), 0, Math.cos(player.yaw));
+  // Third-person camera behind look direction (camYaw), not move snaps
+  const back = new THREE.Vector3(Math.sin(camYaw), 0, Math.cos(camYaw));
   desiredCam.set(
     player.pos.x + back.x * camOffset.z,
     player.pos.y + camOffset.y,
     player.pos.z + back.z * camOffset.z,
   );
-  camera.position.lerp(desiredCam, 1 - Math.pow(0.001, dt));
+  // Snappy follow so look feels free, not latched to cardinals
+  camera.position.lerp(desiredCam, 1 - Math.pow(0.0002, dt));
   camLook.set(player.pos.x, player.pos.y + 1.2, player.pos.z);
   camera.lookAt(camLook);
 
