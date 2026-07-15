@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>THROWWAY — Movement + Hit Feel</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { width: 100%; height: 100%; overflow: hidden; background: #1a1a1e; font-family: ui-monospace, Consolas, monospace; color: #e8e8ec; }
+      #app { width: 100%; height: 100%; }
+      canvas { display: block; width: 100%; height: 100%; }
+      #hud {
+        position: fixed; top: 12px; left: 12px; z-index: 10;
+        background: rgba(0,0,0,0.72); border: 1px solid #444; padding: 10px 12px;
+        font-size: 12px; line-height: 1.45; max-width: 340px; pointer-events: none;
+      }
+      #hud h1 { font-size: 13px; margin-bottom: 6px; color: #f5c542; }
+      #hud .dim { color: #999; }
+      #panel {
+        position: fixed; top: 12px; right: 12px; z-index: 10;
+        background: rgba(0,0,0,0.78); border: 1px solid #444; padding: 12px;
+        font-size: 12px; width: 280px; max-height: calc(100vh - 24px); overflow-y: auto;
+      }
+      #panel h2 { font-size: 12px; margin-bottom: 8px; color: #f5c542; }
+      #panel label { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+      #panel label span { display: flex; justify-content: space-between; }
+      #panel input[type="range"] { width: 100%; }
+      #hint {
+        position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%);
+        z-index: 10; background: rgba(0,0,0,0.65); padding: 8px 14px;
+        font-size: 12px; border: 1px solid #444; white-space: nowrap;
+      }
+      #banner {
+        position: fixed; top: 0; left: 0; right: 0; z-index: 20;
+        background: #7a1f1f; color: #fff; text-align: center;
+        font-size: 11px; padding: 4px 8px; letter-spacing: 0.04em;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="banner">THROWWAY PROTOTYPE — not production · branch prototypes/movement-hit-feel · issue #10</div>
+    <div id="hud">
+      <h1>Debug</h1>
+      <div id="debug">loading…</div>
+    </div>
+    <div id="panel">
+      <h2>Tunables (live)</h2>
+      <div id="sliders"></div>
+    </div>
+    <div id="hint">WASD move · Shift sprint · Space jump · Click hit · R reset</div>
+    <div id="app"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
