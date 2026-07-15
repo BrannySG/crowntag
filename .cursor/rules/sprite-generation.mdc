@@ -1,0 +1,72 @@
+---
+description: How to generate game-ready sprites (combat actors, world props, UI frames) on demand. Use whenever a Unit/enemy/prop needs in-world art, an existing one shows the procedural placeholder, or the user asks to create/generate a sprite, icon, or texture.
+alwaysApply: false
+---
+
+# Generating Sprites
+
+Use the local `@tot/spritegen` CLI to produce consistent, transparent, game-ready
+sprites. Do NOT hand-author sprites or invent image files. The visual identity is
+defined in `creative/art-direction.md`; the default Style Pack is `brainrot`
+(`tools/spritegen/src/styles/brainrot/`).
+
+Character PORTRAITS are never generated — the canonical renders already exist in
+`apps/client/src/assets/chars/` (wired via `apps/client/src/ui/portraits.ts`).
+Generation is for IN-WORLD art: combat actors, environment props, ground plates,
+FX, and UI frames.
+
+## Always delegate to a background subagent
+
+Generation blocks for ~1-3 minutes (and costs OpenAI credits). NEVER run it on the
+main thread. Instead launch a background subagent and keep working:
+
+- Use the Task tool with `subagent_type: shell` and `run_in_background: true`.
+- Give it the exact command below, and tell it to report back the parsed `--json`
+  result: `ok`, `chosen.verdict.score`, `outputs`, and reject paths.
+- When it completes you'll be notified; then do the wiring on the main thread.
+
+## Command
+
+```bash
+# World entity / prop (256x256):
+pnpm --filter @tot/spritegen gen generate \
+  --preset entity --subject "<concrete visual description>" \
+  --id <snake_case_id> --n 3 --json
+
+# UI frame (512, emits CSS 9-slice metadata):
+pnpm --filter @tot/spritegen gen generate \
+  --preset ui-frame --subject "<concrete visual description>" \
+  --id <snake_case_id> --n 2 --json
+```
+
+- `--style brainrot` is the default; pass `--style` only to use another pack.
+- `--subject` is a concrete art description, not the display name. For enemy-side
+  characters, say "Corrupted" in the subject so the corruption treatment
+  (sickly purple-grey, red eyes, glitch aura) is applied.
+- Use `--n 3` (best-of-N) and parse `--json`. Add `--vision-qa` for a stricter check.
+
+## Acting on the result
+
+If `ok: true`, the chosen candidate beat QA (`chosen.verdict.score`). If `ok: false`,
+inspect `error`/`rejects` and retry with a refined `--subject`. Outputs land in
+`AvailableAssets/<Category>/` with a 1024 master in `tools/spritegen/out/masters/`.
+Categories: `Areas/`, `Chars/`, `Cursors/`, `Entities/`, `FX/`, `Items/`, `UI/`.
+
+## Wiring into THIS game (LottoTD Survivors)
+
+Do NOT pass `--wire` — the auto-wiring targets (`apps/client/src/assets/manifest.ts`,
+`packages/shared/...`) are inherited from Tales of Tileria and do not exist here.
+Instead, wire by hand:
+
+1. Copy/verify the output PNG under `AvailableAssets/` (generation puts it there).
+2. Copy the game-size PNG into `apps/client/src/assets/` (e.g. `field/` for combat
+   actors and props) and import it where it is consumed (combat actor texture maps
+   in `apps/client/src/game/`, or CSS for UI frames).
+3. Content definitions in `packages/content` stay presentation-free — texture
+   lookups are keyed by id on the client side only.
+
+Then bump the PATCH in `apps/client/src/version.ts` (registering art is a client change).
+
+## Setup
+
+Requires `tools/spritegen/.env` with `OPENAI_API_KEY` (gitignored). See `tools/spritegen/README.md`.

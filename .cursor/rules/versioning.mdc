@@ -1,0 +1,33 @@
+---
+description: Bump the in-game build version on every change
+alwaysApply: true
+---
+
+# Build Versioning
+
+The game shows a build badge in the bottom-right of the screen (e.g. `Dev V0.2.0a`).
+The single source of truth is `GAME_VERSION` in `apps/client/src/version.ts`.
+
+## Rule: bump the PATCH number on every change
+
+For now we are in early iteration: after making a meaningful code/content change,
+increment ONLY the PATCH (last) number of `GAME_VERSION`.
+Format: `MAJOR.MINOR.PATCH` (e.g. `0.1.4` → `0.1.5` → `0.1.6`).
+
+| Change type | What to bump | Example |
+|-------------|--------------|---------|
+| Any change (fix, tweak, feature, polish) | PATCH (last number) | `0.1.4` → `0.1.5` |
+
+Do NOT bump MAJOR or MINOR. The repo owner decides when to shift to `0.2`, `0.3`,
+`1.0`, etc. — never do this on your own.
+
+## How
+
+Edit only the one line in `apps/client/src/version.ts`:
+
+```typescript
+export const GAME_VERSION = '0.1.5';
+```
+
+Do not hardcode the version anywhere else — import `GAME_VERSION` / `VERSION_LABEL`
+from `version.ts` instead.

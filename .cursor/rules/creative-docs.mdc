@@ -1,0 +1,119 @@
+# Creative Docs — Board + Review Protocol
+
+Applies whenever any file inside `creative/` is read, created, or edited.
+
+## The board is the source of truth
+
+[`creative/backlog.md`](../../creative/backlog.md) is the **single source of truth
+for Priority + Status + Size**. It is the only creative doc kept *always current*.
+The prose docs ([`design-ideas.md`](../../creative/design-ideas.md),
+[`ux-housekeeping.md`](../../creative/ux-housekeeping.md)) hold the **detail**:
+write-ups, Review blocks, and design rationale. To **choose** work, read the
+board; to **understand** an item, follow its link into the prose doc.
+(`creative/art-direction.md` is reference, not a task doc.)
+
+## Lifecycle (board Status)
+
+| Status | Meaning |
+|--------|---------|
+| **Idea** | Captured, not yet scoped. Not pickable. Big initiatives live here until sliced. |
+| **Ready** | Scoped, no open decisions. The pick-from pool for the `ship` skill. **Must be size S or M.** |
+| **In progress** | Actively being built. |
+| **Shipped** | Done + closed out (version bumped, write-up archived). |
+| **Blocked** | Has an open `DECISION FIRST` gate or an unbuilt dependency. Resolve the gate to unblock. |
+
+## Size gate
+
+| Size | Meaning |
+|------|---------|
+| **S** | One focused pass. |
+| **M** | A small sprint; finishable end-to-end in one go. |
+| **L** | Multi-sprint initiative. **An L can never be `Ready`** — slice it into S/M tasks first (via grilling or a `/review` pass). |
+
+Promotion **Idea → Ready** is always an *explicit* act (a slicing/grilling pass or
+a `/review`), never automatic. That is what keeps the Ready pool trustworthy.
+
+## Two cadences (keep capture cheap)
+
+**1. On capture (cheap touch — the default).** When a `creative/` doc gains or
+changes a single item:
+
+1. Write/update that item in its prose doc (write-up + Review block, dated).
+2. Add or update **that item's row** on the board (Priority / Status / Size).
+3. Note inline if it clearly upgrades, contradicts, or reinforces an existing entry.
+
+**Do NOT** re-read the whole doc, re-rate every other item, or refresh the Game
+Loop Snapshot on a capture. That is the expensive sweep — it runs only on `/review`.
+
+**2. On `/review` (explicit full sweep — on demand or cadence).** This is the
+*only* time the deep docs are fully re-evaluated:
+
+1. Re-read the entire doc(s) under review.
+2. Re-rate every idea using the **Priority scale** below.
+3. Update each item's **Review block** and its board row.
+4. Refresh the **Current Game Loop Snapshot** below if the loop materially changed.
+5. Escalate previously LONG-TERM/Idea items that have become actionable; slice
+   any L that is ready to become Ready S/M tasks.
+6. Update the "Last reviewed" marker on the touched doc(s).
+
+## Priority scale
+
+| Rating | Meaning |
+|--------|---------|
+| **HIGH** | Directly strengthens the active game loop. High player-facing impact. Low-to-moderate implementation cost relative to return. Build soon. |
+| **MEDIUM** | Valuable but not urgent. Complements the loop without being a gap. Can wait for a sprint gap or natural sequencing. |
+| **LOW** | Polish, housekeeping, or timing-dependent. Do eventually, not now. |
+| **LONG-TERM** | Depends on systems or content that don't exist yet. Document and design now; build later. |
+| **DECISION FIRST** | Good idea but requires a design/product decision before any implementation. Maps to **Blocked** on the board; flag the question to answer. |
+
+## Current Game Loop Snapshot
+
+*Owned by the `/review` sweep — refresh here only when a new system ships or a
+major mechanic changes, not on every capture. Vocabulary: `CONTEXT.md`.*
+
+**Last updated: 2026-07-09**
+
+### Layer 1 — Moment-to-moment (in-Run)
+- Corrupted waves converge on the stationary Hero (67); equipped Units fight
+  automatically per their attack kind (projectile / burst / chain / aura / beam)
+- Kills leave Drops (XP gems, Run Currency coins) that lie in the field until
+  the player sweeps the Magnet (cursor/finger) over them
+- Run Currency → **Summon** (random Unit, rarity-weighted, with Reveal juice)
+  or **Luck** (shifts odds for the rest of the Run)
+- Drag identical Units to **Merge** up the Rarity ladder (Recipes, incl.
+  secret Recipes from different Units); mythic+ reachable only by Merging
+- Equip Slots deploy Units into the defense ring around the Hero
+
+### Layer 2 — Run progression
+- Collected XP levels the Hero → pick-1-of-3 **Perk** (run-long build)
+- Elites every ~2 min; Difficulty's Boss chain gates the win (final Boss kill
+  wins; mid-chain Bosses grant currency/XP spikes); Hero death loses
+- Difficulty tiers extend the chain and harden modifiers
+
+### Layer 3 — Meta loop
+- Run end → shard payout by performance (win bonus, difficulty mult)
+- Shards buy permanent **Upgrades** (Equip Slots, Unit Grid size)
+- Clearing unlocks: next Difficulty on the Level, next Level (Verdant Meadow →
+  Overgrown Frontier)
+- Persisted in localStorage (`lotto-td-meta-v1`)
+
+### What is parked / not yet built
+- Unique enemy pool / background / boss chain for Level 2 (currently reuses
+  Level 1 content)
+- Any server/multiplayer/leaderboard surface
+- Patch-notes surface in the client
+
+## How priority decisions are made
+
+When rating, consider:
+
+1. **Does it fill a felt gap in the existing loop?** (missing feedback, missing
+   economy hook, missing sense of progress)
+2. **Does it require other unbuilt systems to function?** (if yes, lower the
+   rating or mark LONG-TERM)
+3. **How many players does it affect per session?** (every-session touches > rare
+   event touches)
+4. **Is there a design question that must be answered first?** (if yes, mark
+   DECISION FIRST and name the question explicitly)
+5. **What is the implementation cost relative to the return?** (high-ROI polish
+   can outrank medium-effort features)
