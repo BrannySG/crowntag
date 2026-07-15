@@ -325,9 +325,15 @@ export function createArenaScene(container: HTMLElement): ArenaScene {
         smoothToward(pose, target, dt);
       }
 
-      entry.root.position.set(pose.x, pose.y, pose.z);
-      entry.root.rotation.y = pose.yaw;
-      entry.label.position.set(pose.x, 2.05 + pose.y, pose.z);
+      if (!entry.visual.ownsRootTransform?.()) {
+        entry.root.position.set(pose.x, pose.y, pose.z);
+        entry.root.rotation.y = pose.yaw;
+      }
+      entry.label.position.set(
+        entry.root.position.x,
+        2.05 + entry.root.position.y,
+        entry.root.position.z,
+      );
       const holding = snap.crown.holderId === f.id;
       const tintColor = holding ? 0xf5c542 : colorFor(f, localFighterId);
       entry.visual.update(f, { holding, tintColor }, dt);

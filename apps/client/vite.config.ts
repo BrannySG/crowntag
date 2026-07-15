@@ -18,6 +18,12 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    rollupOptions: {
+      input: {
+        main: path.resolve(__dirname, 'index.html'),
+        ragdollLab: path.resolve(__dirname, 'ragdoll-lab.html'),
+      },
+    },
   },
   resolve: {
     alias: {

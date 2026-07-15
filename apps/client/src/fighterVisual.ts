@@ -4,6 +4,8 @@ import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { MOVEMENT } from '@crowntag/content';
 import type { FighterSnapshot } from '@crowntag/protocol';
 import bunnyGlbUrl from './assets/models/characters/Mesh_BunnyChar_00.glb';
+import { createBunnyRagdoll, initRagdollPhysics } from './bunnyRagdoll';
+import { captureBonePose, createPoseBlend } from './ragdollBlend';
 
 /** Target character height in world units (roughly capsule-tall). */
 const TARGET_HEIGHT = 1.8;
@@ -28,9 +30,15 @@ export let FIGHTER_MODEL_SCALE = 1;
 /** Child Y offset so feet sit at root y=0 after scale. */
 export let FIGHTER_MODEL_Y_OFFSET = 0;
 
+const RAGDOLL_MAX_SEC = 2.0;
+const SETTLE_HOLD_SEC = 0.25;
+const RECOVER_BLEND_SEC = 0.35;
+
 export type FighterVisual = {
   root: THREE.Group;
   isPlaceholder?: boolean;
+  /** True while ragdoll is active or kinematic recover blend owns the pose. */
+  ownsRootTransform?: () => boolean;
   update(
     f: FighterSnapshot,
     opts: { holding: boolean; tintColor: number },
@@ -68,7 +76,10 @@ export function prefetchFighterModel(): Promise<void> {
 }
 
 async function loadFighterModel(): Promise<void> {
-  const gltf = await new GLTFLoader().loadAsync(bunnyGlbUrl);
+  const [, gltf] = await Promise.all([
+    initRagdollPhysics(),
+    new GLTFLoader().loadAsync(bunnyGlbUrl),
+  ]);
   const scene = gltf.scene;
 
   const box = new THREE.Box3().setFromObject(scene);
@@ -133,6 +144,9 @@ function createBunnyVisual(): FighterVisual {
   const cloned = SkeletonUtils.clone(templateRoot!) as THREE.Group;
   root.add(cloned);
 
+  // Capture bind pose before idle plays — bone locals are still bind.
+  const bindPoseSamples = captureBonePose(root);
+
   const { tintables, clonedMaterials } = collectTintables(cloned);
   const tintTmpColor = new THREE.Color();
   const mixer = new THREE.AnimationMixer(cloned);
@@ -149,10 +163,18 @@ function createBunnyVisual(): FighterVisual {
     return action;
   }
 
+  type RagdollPhase = 'none' | 'knockdown' | 'recover';
+  const ragdoll = createBunnyRagdoll(root);
+  let ragdollPhase: RagdollPhase = 'none';
+  let ragdollElapsed = 0;
+  let settleHold = 0;
+  let poseBlend: ReturnType<typeof createPoseBlend> | null = null;
+  let blending = false;
   let currentAction: THREE.AnimationAction | null = null;
   let currentActionName: string | null = null;
   let prevOnGround = true;
   let prevHitCooldown = 0;
+  let prevStun = 0;
   let attackPlaying = false;
   let jumpLandPlaying = false;
 
@@ -218,6 +240,7 @@ function createBunnyVisual(): FighterVisual {
   return {
     root,
     isPlaceholder: false,
+    ownsRootTransform: () => ragdoll.active || blending,
     update(f, opts, dt) {
       const tintStrength = opts.holding ? 0.85 : 0.55;
       for (const { mat, baseColor } of tintables) {
@@ -226,51 +249,93 @@ function createBunnyVisual(): FighterVisual {
         else mat.emissive.setHex(0x000000);
       }
 
-      if (f.stunRemaining > 0) {
+      const stunEnter = f.stunRemaining > 0 && prevStun <= 0;
+
+      if (stunEnter) {
+        mixer.stopAllAction();
+        currentAction = null;
+        currentActionName = null;
         attackPlaying = false;
         jumpLandPlaying = false;
-        crossfadeTo(CLIP_DAMAGE, { loop: THREE.LoopRepeat, fade: ONESHOT_FADE });
-      } else if (attackPlaying) {
-        if (isActionFinished(CLIP_ATTACK)) {
-          attackPlaying = false;
-        }
-      } else if (f.hitCooldownRemaining > prevHitCooldown + 1e-4) {
-        attackPlaying = playOneShot(CLIP_ATTACK);
-        jumpLandPlaying = false;
-      } else if (!f.onGround) {
-        jumpLandPlaying = false;
-        if (prevOnGround) {
-          playOneShot(CLIP_JUMP_START);
-        } else if (currentActionName !== CLIP_JUMP_START) {
-          crossfadeTo(CLIP_JUMP_START, {
-            loop: THREE.LoopOnce,
-            fade: ONESHOT_FADE,
-            clamp: true,
+        ragdoll.enable({ vx: f.vx, vz: f.vz });
+        ragdoll.setPoseStrength(0);
+        ragdollPhase = 'knockdown';
+        ragdollElapsed = 0;
+        settleHold = 0;
+        poseBlend = null;
+        blending = false;
+      }
+
+      if (ragdollPhase === 'knockdown' && ragdoll.active) {
+        ragdoll.step(dt);
+        ragdollElapsed += dt;
+        if (ragdoll.isSettled(0.8, 2.0)) settleHold += dt;
+        else settleHold = 0;
+        if (settleHold >= SETTLE_HOLD_SEC || ragdollElapsed >= RAGDOLL_MAX_SEC) {
+          const from = captureBonePose(root);
+          ragdoll.disable();
+          blending = true;
+          poseBlend = createPoseBlend({
+            root,
+            from,
+            to: bindPoseSamples,
+            durationSec: RECOVER_BLEND_SEC,
           });
-        } else {
-          // Hold last frame of jump_start while airborne.
-          const jump = actions.get(CLIP_JUMP_START);
-          if (jump && isActionFinished(CLIP_JUMP_START)) {
-            jump.paused = true;
+          ragdollPhase = 'recover';
+        }
+      } else if (ragdollPhase === 'recover' && poseBlend) {
+        const done = poseBlend.update(dt);
+        if (done) {
+          blending = false;
+          poseBlend = null;
+          ragdollPhase = 'none';
+          crossfadeTo(CLIP_IDLE, { loop: THREE.LoopRepeat, fade: LOCO_FADE });
+        }
+      } else if (ragdollPhase === 'none' && !ragdoll.active) {
+        if (attackPlaying) {
+          if (isActionFinished(CLIP_ATTACK)) {
+            attackPlaying = false;
           }
-        }
-      } else if (!prevOnGround || jumpLandPlaying) {
-        if (!prevOnGround) {
-          jumpLandPlaying = playOneShot(CLIP_JUMP_LAND);
-        }
-        if (jumpLandPlaying && isActionFinished(CLIP_JUMP_LAND)) {
+        } else if (f.hitCooldownRemaining > prevHitCooldown + 1e-4) {
+          attackPlaying = playOneShot(CLIP_ATTACK);
           jumpLandPlaying = false;
+        } else if (!f.onGround) {
+          jumpLandPlaying = false;
+          if (prevOnGround) {
+            playOneShot(CLIP_JUMP_START);
+          } else if (currentActionName !== CLIP_JUMP_START) {
+            crossfadeTo(CLIP_JUMP_START, {
+              loop: THREE.LoopOnce,
+              fade: ONESHOT_FADE,
+              clamp: true,
+            });
+          } else {
+            // Hold last frame of jump_start while airborne.
+            const jump = actions.get(CLIP_JUMP_START);
+            if (jump && isActionFinished(CLIP_JUMP_START)) {
+              jump.paused = true;
+            }
+          }
+        } else if (!prevOnGround || jumpLandPlaying) {
+          if (!prevOnGround) {
+            jumpLandPlaying = playOneShot(CLIP_JUMP_LAND);
+          }
+          if (jumpLandPlaying && isActionFinished(CLIP_JUMP_LAND)) {
+            jumpLandPlaying = false;
+            playLocomotion(f);
+          }
+        } else {
           playLocomotion(f);
         }
-      } else {
-        playLocomotion(f);
       }
 
       prevOnGround = f.onGround;
       prevHitCooldown = f.hitCooldownRemaining;
-      mixer.update(dt);
+      prevStun = f.stunRemaining;
+      if (!ragdoll.active && !blending) mixer.update(dt);
     },
     dispose() {
+      ragdoll.dispose();
       mixer.stopAllAction();
       mixer.uncacheRoot(cloned);
       for (const mat of clonedMaterials) mat.dispose();

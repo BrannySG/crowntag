@@ -12,6 +12,8 @@
     "@crowntag/content": "workspace:*",
     "@crowntag/protocol": "workspace:*",
     "@crowntag/sim": "workspace:*",
+    "@dimforge/rapier3d-compat": "^0.19.3",
+    "lil-gui": "^0.21.0",
     "three": "^0.172.0"
   },
   "devDependencies": {
