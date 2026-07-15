@@ -1,4 +1,5 @@
 import { createOfflineWorld, FIXED_DT } from '@crowntag/sim';
+import { startMusic } from './audio/music';
 import { createArenaScene } from './scene';
 import { createInput } from './input';
 import { connectNet, type NetClient } from './net';
@@ -90,6 +91,7 @@ async function tryJoin() {
 }
 
 function startOffline() {
+  startMusic();
   const world = createOfflineWorld();
   let accumulator = 0;
   let last = performance.now();
@@ -136,6 +138,7 @@ function startOffline() {
 }
 
 function startOnline(net: NetClient) {
+  startMusic();
   let accumulator = 0;
   let last = performance.now();
 
