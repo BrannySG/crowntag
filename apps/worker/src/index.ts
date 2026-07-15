@@ -155,7 +155,7 @@ export class Arena extends DurableObject<Env> {
   }
 
   private matchmaker(): DurableObjectStub {
-    return this.env.MATCHMAKER.getByName(MATCHMAKER_NAME);
+    return this.env.MATCHMAKER.get(this.env.MATCHMAKER.idFromName(MATCHMAKER_NAME));
   }
 
   /** Report human Player count only — bots are Arena-local and must not fill Cap for Matchmaker. */
@@ -381,14 +381,14 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname === '/join' && request.method === 'POST') {
-      const stub = env.MATCHMAKER.getByName(MATCHMAKER_NAME);
+      const stub = env.MATCHMAKER.get(env.MATCHMAKER.idFromName(MATCHMAKER_NAME));
       return stub.fetch(request);
     }
 
     const arenaMatch = url.pathname.match(/^\/arena\/([^/]+)$/);
     if (arenaMatch) {
       const arenaId = decodeURIComponent(arenaMatch[1]!);
-      const stub = env.ARENA.getByName(arenaId);
+      const stub = env.ARENA.get(env.ARENA.idFromName(arenaId));
       return stub.fetch(request);
     }
 
