@@ -412,6 +412,7 @@ export class World {
 
   /**
    * ADR 0004 chase AI: Claim free Crown, chase Holder + Hit in range, flee when holding.
+   * Flee steers into open space (not straight into perimeter walls).
    */
   private applyBotAi(f: FighterState): void {
     if (f.stunRemaining > 0) {
@@ -446,11 +447,24 @@ export class World {
         f.input = { ...EMPTY_INPUT, yaw: f.yaw };
         return;
       }
-      // Face away from nearest pursuer.
+      // Flee away from pursuer, but pull target inward so we don't glue to walls.
+      const awayX = f.x - nearest.x;
+      const awayZ = f.z - nearest.z;
+      const awayLen = Math.hypot(awayX, awayZ) || 1;
+      let tx = f.x + (awayX / awayLen) * 8;
+      let tz = f.z + (awayZ / awayLen) * 8;
+      const softLim = ARENA_SIZE / 2 - 6;
+      tx = Math.max(-softLim, Math.min(softLim, tx));
+      tz = Math.max(-softLim, Math.min(softLim, tz));
+      // Near the wall: cut toward center first.
+      if (Math.abs(f.x) > softLim || Math.abs(f.z) > softLim) {
+        tx = CROWN_SPAWN.x;
+        tz = CROWN_SPAWN.z;
+      }
       f.input = {
         forward: 1,
         strafe: 0,
-        yaw: Math.atan2(nearest.x - f.x, nearest.z - f.z),
+        yaw: yawToward(f.x, f.z, tx, tz),
         sprint: true,
         jump: false,
         hit: false,
@@ -465,12 +479,15 @@ export class World {
     }
     const dist = distXZ(f.x, f.z, holder.x, holder.z);
     const inRange = dist <= HIT.hitRange + holder.radius;
+    // If jammed on a wall while chasing, strafe toward center to unstick.
+    const softLim = ARENA_SIZE / 2 - 5;
+    const stuckOnWall = Math.abs(f.x) > softLim || Math.abs(f.z) > softLim;
     f.input = {
-      forward: 1,
-      strafe: 0,
+      forward: stuckOnWall ? 0.35 : 1,
+      strafe: stuckOnWall ? Math.sign(CROWN_SPAWN.x - f.x || 1) * 0.85 : 0,
       yaw: yawToward(f.x, f.z, holder.x, holder.z),
       sprint: true,
-      jump: false,
+      jump: stuckOnWall,
       hit: inRange && f.hitCooldownRemaining <= 0,
     };
   }

@@ -161,7 +161,6 @@ export function createArenaScene(container: HTMLElement): ArenaScene {
 
   const camOffset = new THREE.Vector3(0, 4.5, 7.5);
   const camLook = new THREE.Vector3();
-  const desiredCam = new THREE.Vector3();
 
   function updateFromSnapshot(
     snap: ArenaSnapshot,
@@ -188,14 +187,14 @@ export function createArenaScene(container: HTMLElement): ArenaScene {
     crown.rotation.y += dt * 2.5;
 
     if (local) {
+      // Hard-follow local Fighter — lerp fought reconcile snaps and caused vibration.
       const backX = Math.sin(camYaw);
       const backZ = Math.cos(camYaw);
-      desiredCam.set(
+      camera.position.set(
         local.x + backX * camOffset.z,
         local.y + camOffset.y,
         local.z + backZ * camOffset.z,
       );
-      camera.position.lerp(desiredCam, 1 - Math.pow(0.0002, dt));
       camLook.set(local.x, local.y + 1.2, local.z);
       camera.lookAt(camLook);
     }

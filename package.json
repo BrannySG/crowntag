@@ -8,5 +8,8 @@
     "deploy": "pnpm --filter @crowntag/client build && pnpm --filter @crowntag/worker run deploy",
     "typecheck": "pnpm -r run typecheck"
   },
-  "packageManager": "pnpm@9.15.0"
+  "packageManager": "pnpm@9.15.0",
+  "devDependencies": {
+    "tsx": "^4.23.1"
+  }
 }
