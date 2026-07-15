@@ -1,0 +1,10 @@
+{
+  "name": "crowntag",
+  "private": true,
+  "scripts": {
+    "dev:worker": "pnpm --filter @crowntag/worker dev",
+    "dev:client": "pnpm --filter @crowntag/client dev",
+    "typecheck": "pnpm -r run typecheck"
+  },
+  "packageManager": "pnpm@9.15.0"
+}
