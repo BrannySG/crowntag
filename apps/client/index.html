@@ -79,11 +79,20 @@
       #controls {
         position: absolute;
         right: 16px;
-        bottom: 16px;
+        bottom: 28px;
         font-size: 12px;
         color: #9a9aa8;
         text-align: right;
         line-height: 1.5;
+      }
+      #build-version {
+        position: absolute;
+        right: 16px;
+        bottom: 8px;
+        font-size: 11px;
+        color: #7a7a88;
+        letter-spacing: 0.03em;
+        pointer-events: none;
       }
       #join {
         position: fixed;
@@ -196,6 +205,7 @@
         <span id="mode-label">Hosted arena</span><br />
         Claim by proximity · Steal with Hit
       </div>
+      <div id="build-version"></div>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

@@ -5,6 +5,7 @@ import {
   CLAIM_RADIUS,
   CROWN_SPAWN,
   FIGHTER_SPAWNS,
+  GRACE_DURATION,
   HIT,
   MOVEMENT,
   OBSTACLES,
@@ -112,6 +113,8 @@ export class World {
   private time = 0;
   private fighters: FighterState[] = [];
   private holderId: string | null = null;
+  /** Steal immunity remaining for the current Holder (seconds). */
+  private graceRemaining = 0;
   private pendingInputs = new Map<string, FighterInput>();
   private pendingSeqs = new Map<string, number>();
   private nextSpawnIndex = 0;
@@ -224,7 +227,10 @@ export class World {
   removeFighter(id: string): boolean {
     const idx = this.fighters.findIndex((f) => f.id === id);
     if (idx < 0) return false;
-    if (this.holderId === id) this.holderId = null;
+    if (this.holderId === id) {
+      this.holderId = null;
+      this.graceRemaining = 0;
+    }
     this.fighters.splice(idx, 1);
     this.pendingInputs.delete(id);
     this.pendingSeqs.delete(id);
@@ -239,6 +245,7 @@ export class World {
     this.tick = snap.tick;
     this.time = snap.time;
     this.holderId = snap.crown.holderId;
+    if (this.holderId === null) this.graceRemaining = 0;
     this.pendingInputs.clear();
     this.pendingSeqs.clear();
 
@@ -291,6 +298,7 @@ export class World {
       f.hitCooldownRemaining = Math.max(0, f.hitCooldownRemaining - dt);
       f.stunRemaining = Math.max(0, f.stunRemaining - dt);
     }
+    this.graceRemaining = Math.max(0, this.graceRemaining - dt);
 
     for (const f of this.fighters) {
       if (f.kind === 'dummy') this.stepDummy(f, dt);
@@ -496,6 +504,7 @@ export class World {
     this.tick = 0;
     this.time = 0;
     this.holderId = null;
+    this.graceRemaining = 0;
     this.pendingInputs.clear();
     this.pendingSeqs.clear();
     this.nextSpawnIndex = 0;
@@ -595,7 +604,9 @@ export class World {
     let inputF = stunned ? 0 : f.input.forward;
     let inputR = stunned ? 0 : f.input.strafe;
     const sprinting = !stunned && f.input.sprint;
-    const speed = MOVEMENT.moveSpeed * (sprinting ? MOVEMENT.sprintMult : 1);
+    const holderMult = this.holderId === f.id ? MOVEMENT.holderSpeedMult : 1;
+    const speed =
+      MOVEMENT.moveSpeed * (sprinting ? MOVEMENT.sprintMult : 1) * holderMult;
 
     if (inputF !== 0 || inputR !== 0) {
       const len = Math.hypot(inputF, inputR);
@@ -727,8 +738,11 @@ export class World {
     });
 
     if (this.holderId === best.id) {
+      // Grace: Hit registers but Crown does not transfer.
+      if (this.graceRemaining > 0) return events;
       const fromId = best.id;
       this.holderId = attacker.id;
+      this.graceRemaining = GRACE_DURATION;
       events.push({ type: 'stolen', fromId, toId: attacker.id });
     } else {
       best.stunRemaining = HIT.stunDuration;
@@ -764,6 +778,7 @@ export class World {
     }
     if (best) {
       this.holderId = best.id;
+      this.graceRemaining = GRACE_DURATION;
       events.push({ type: 'claimed', fighterId: best.id });
     }
     return events;

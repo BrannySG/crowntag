@@ -2,6 +2,7 @@ import { createOfflineWorld, FIXED_DT } from '@crowntag/sim';
 import { createArenaScene } from './scene';
 import { createInput } from './input';
 import { connectNet, type NetClient } from './net';
+import { VERSION_LABEL } from './version';
 
 const app = document.getElementById('app');
 if (!app) throw new Error('#app missing');
@@ -17,6 +18,9 @@ const joinErr = document.getElementById('join-err');
 const offlineLink = document.getElementById('offline-link');
 const modeLabel = document.getElementById('mode-label');
 const controlsEl = document.getElementById('controls');
+const buildVersionEl = document.getElementById('build-version');
+
+if (buildVersionEl) buildVersionEl.textContent = VERSION_LABEL;
 
 const params = new URLSearchParams(location.search);
 const wantOffline = params.get('offline') === '1';

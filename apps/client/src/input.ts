@@ -11,6 +11,12 @@ export type ClientInputState = {
 
 const LOOK_SENS = 0.0022;
 
+function isTypingTarget(el: Element | null): boolean {
+  if (!el) return false;
+  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return true;
+  return el instanceof HTMLElement && el.isContentEditable;
+}
+
 export type InputController = {
   state: ClientInputState;
   /** Read WASD / sprint / jump from the key set into `state`. */
@@ -33,11 +39,13 @@ export function createInput(canvas: HTMLElement): InputController {
   };
 
   const onKeyDown = (e: KeyboardEvent) => {
+    if (isTypingTarget(document.activeElement)) return;
     keys.add(e.code);
     if (e.code === 'KeyR') state.resetQueued = true;
     if (['Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD'].includes(e.code)) e.preventDefault();
   };
   const onKeyUp = (e: KeyboardEvent) => {
+    // Always release — keyup while typing must still clear held game keys.
     keys.delete(e.code);
   };
   const onBlur = () => keys.clear();
@@ -69,6 +77,13 @@ export function createInput(canvas: HTMLElement): InputController {
   return {
     state,
     syncKeys: () => {
+      if (isTypingTarget(document.activeElement)) {
+        state.forward = 0;
+        state.strafe = 0;
+        state.sprint = false;
+        state.jump = false;
+        return;
+      }
       let f = 0;
       let r = 0;
       if (keys.has('KeyW') || keys.has('ArrowUp')) f += 1;

@@ -43,6 +43,9 @@ _Avoid_: Attack, Shot, Tag, Melee
 **Steal**:
 Hit outcome against the Holder: the Crown transfers to the hitter, who becomes the new Holder. No Stun or Knockback on Steal in V1.
 
+**Grace**:
+Brief period after a Fighter becomes Holder (via Claim or Steal) during which Steal cannot transfer the Crown. Duration is config-tweakable; exact numbers are not part of the glossary.
+
 **Stun**:
 Brief movement lock applied to a non-Holder hit by a Hit. Duration is config-tweakable; exact numbers are not part of the glossary.
 

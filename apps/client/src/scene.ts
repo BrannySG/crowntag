@@ -162,6 +162,40 @@ export function createArenaScene(container: HTMLElement): ArenaScene {
   const camOffset = new THREE.Vector3(0, 4.5, 7.5);
   const camLook = new THREE.Vector3();
 
+  /** Client-only render pose — smooths 20 Hz sim snaps without touching authority. */
+  type DisplayPose = { x: number; y: number; z: number; yaw: number };
+  const displayPoses = new Map<string, DisplayPose>();
+  const SMOOTH_RATE = 15;
+  const SNAP_DIST = 2.5;
+
+  function shortestAngleDelta(from: number, to: number): number {
+    let d = to - from;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    return d;
+  }
+
+  function smoothToward(
+    pose: DisplayPose,
+    target: { x: number; y: number; z: number; yaw: number },
+    dt: number,
+  ) {
+    const dx = target.x - pose.x;
+    const dz = target.z - pose.z;
+    if (dx * dx + dz * dz > SNAP_DIST * SNAP_DIST) {
+      pose.x = target.x;
+      pose.y = target.y;
+      pose.z = target.z;
+      pose.yaw = target.yaw;
+      return;
+    }
+    const a = 1 - Math.exp(-SMOOTH_RATE * Math.max(dt, 0));
+    pose.x += (target.x - pose.x) * a;
+    pose.y += (target.y - pose.y) * a;
+    pose.z += (target.z - pose.z) * a;
+    pose.yaw += shortestAngleDelta(pose.yaw, target.yaw) * a;
+  }
+
   function updateFromSnapshot(
     snap: ArenaSnapshot,
     localFighterId: string,
@@ -169,33 +203,57 @@ export function createArenaScene(container: HTMLElement): ArenaScene {
     dt: number,
   ) {
     pruneFighters(snap);
-    const local = snap.fighters.find((f) => f.id === localFighterId);
+    const alive = new Set(snap.fighters.map((f) => f.id));
+    for (const id of displayPoses.keys()) {
+      if (!alive.has(id)) displayPoses.delete(id);
+    }
+
+    let localDisplay: DisplayPose | undefined;
 
     for (const f of snap.fighters) {
       const entry = ensureFighter(f, localFighterId);
-      entry.body.position.set(f.x, 0.9 + f.y, f.z);
-      entry.body.rotation.y = f.yaw;
-      entry.label.position.set(f.x, 2.05 + f.y, f.z);
+      const isLocal = f.id === localFighterId;
+      const extrap = isLocal ? Math.min(Math.max(dt, 0), 0.05) : 0;
+      const target = {
+        x: f.x + f.vx * extrap,
+        y: f.y,
+        z: f.z + f.vz * extrap,
+        yaw: f.yaw,
+      };
+
+      let pose = displayPoses.get(f.id);
+      if (!pose) {
+        pose = { x: target.x, y: target.y, z: target.z, yaw: target.yaw };
+        displayPoses.set(f.id, pose);
+      } else {
+        smoothToward(pose, target, dt);
+      }
+
+      entry.body.position.set(pose.x, 0.9 + pose.y, pose.z);
+      entry.body.rotation.y = pose.yaw;
+      entry.label.position.set(pose.x, 2.05 + pose.y, pose.z);
       const holding = snap.crown.holderId === f.id;
       if (holding) entry.mat.color.setHex(0xf5c542);
       else entry.mat.color.setHex(colorFor(f, localFighterId));
       if (f.stunRemaining > 0) entry.mat.emissive.setHex(0x442200);
       else entry.mat.emissive.setHex(0x000000);
+
+      if (isLocal) localDisplay = pose;
     }
 
     crown.position.set(snap.crown.x, snap.crown.y, snap.crown.z);
     crown.rotation.y += dt * 2.5;
 
-    if (local) {
-      // Hard-follow local Fighter — lerp fought reconcile snaps and caused vibration.
+    if (localDisplay) {
+      // Follow smoothed display pose — hard 20 Hz snaps read as camera vibration.
       const backX = Math.sin(camYaw);
       const backZ = Math.cos(camYaw);
       camera.position.set(
-        local.x + backX * camOffset.z,
-        local.y + camOffset.y,
-        local.z + backZ * camOffset.z,
+        localDisplay.x + backX * camOffset.z,
+        localDisplay.y + camOffset.y,
+        localDisplay.z + backZ * camOffset.z,
       );
-      camLook.set(local.x, local.y + 1.2, local.z);
+      camLook.set(localDisplay.x, localDisplay.y + 1.2, localDisplay.z);
       camera.lookAt(camLook);
     }
   }

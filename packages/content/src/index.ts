@@ -1,5 +1,5 @@
 /** Bumped when tweakable content that clients must agree on changes. */
-export const CONTENT_REVISION = '2';
+export const CONTENT_REVISION = '3';
 
 /** Default Cap for an Arena (ADR domain). */
 export const CAP = 12;
@@ -40,8 +40,10 @@ export const TICK_HZ = 20;
 
 /** ADR 0005 movement baselines. */
 export const MOVEMENT = {
-  moveSpeed: 8,
-  sprintMult: 1.6,
+  moveSpeed: 5.5,
+  sprintMult: 1.45,
+  /** Applied while Fighter is Holder (stacks with sprint). */
+  holderSpeedMult: 1.35,
   jumpImpulse: 9,
 } as const;
 
@@ -53,6 +55,9 @@ export const HIT = {
   stunDuration: 0.7,
   knockbackStrength: 11,
 } as const;
+
+/** Steal immunity after becoming Holder via Claim or Steal (seconds). */
+export const GRACE_DURATION = 2;
 
 /** Physics + body sizes used by the sim. */
 export const PHYSICS = {
