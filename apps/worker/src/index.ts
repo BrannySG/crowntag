@@ -158,6 +158,7 @@ export class Arena extends DurableObject<Env> {
     return this.env.MATCHMAKER.getByName(MATCHMAKER_NAME);
   }
 
+  /** Report human Player count only — bots are Arena-local and must not fill Cap for Matchmaker. */
   private async reportOccupancy(): Promise<void> {
     try {
       await this.matchmaker().fetch(
@@ -166,7 +167,7 @@ export class Arena extends DurableObject<Env> {
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
             arenaId: this.arenaId(),
-            fighterCount: this.world.getFighterCount(),
+            fighterCount: this.world.getPlayerCount(),
           }),
         }),
       );

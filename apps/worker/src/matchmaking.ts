@@ -3,13 +3,16 @@ import { CAP } from '@crowntag/content';
 /** Occupancy row kept in Matchmaker DO storage. */
 export type ArenaOccupancy = {
   id: string;
-  /** Reserved/reported Fighter count (humans + bots when bots exist). */
+  /**
+   * Reserved/reported human Player count toward Cap.
+   * Bots are Arena-local and must not be included here.
+   */
   fighterCount: number;
 };
 
 /**
- * Fullest non-full Arena, or a new id. Optimistically reserves one Fighter slot.
- * Cap is total Fighters (players + bots); without bots this is humans only.
+ * Fullest non-full Arena, or a new id. Optimistically reserves one human Player slot.
+ * Cap is max humans; bots fill Cap inside Arena and do not affect Matchmaker occupancy.
  */
 export function reserveJoinSlot(
   arenas: ArenaOccupancy[],
@@ -47,7 +50,7 @@ export function releaseJoinSlot(
   );
 }
 
-/** Authoritative occupancy from Arena (connect / disconnect). */
+/** Authoritative human Player occupancy from Arena (connect / disconnect). */
 export function setArenaOccupancy(
   arenas: ArenaOccupancy[],
   arenaId: string,

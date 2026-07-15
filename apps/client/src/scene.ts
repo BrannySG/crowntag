@@ -241,7 +241,14 @@ export function createArenaScene(container: HTMLElement): ArenaScene {
       if (isLocal) localDisplay = pose;
     }
 
-    crown.position.set(snap.crown.x, snap.crown.y, snap.crown.z);
+    const holderId = snap.crown.holderId;
+    const holderPose = holderId ? displayPoses.get(holderId) : undefined;
+    if (holderPose) {
+      // Match World.getSnapshot crown Y offset (holder.y + 1.85).
+      crown.position.set(holderPose.x, holderPose.y + 1.85, holderPose.z);
+    } else {
+      crown.position.set(snap.crown.x, snap.crown.y, snap.crown.z);
+    }
     crown.rotation.y += dt * 2.5;
 
     if (localDisplay) {
