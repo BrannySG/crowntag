@@ -13,7 +13,7 @@ A human-controlled participant in an Arena. Has a Display Name, can hold the Cro
 _Avoid_: User, Client
 
 **Bot**:
-A server-driven Arena participant that fills toward Cap. Can hold the Crown and score like a Player. To other humans it is indistinguishable in presentation from a Player (convincing Display Name, same body/avatar); internally it remains a Bot.
+A server-driven Arena participant that fills toward Cap. Can hold the Crown and score like a Player. To other humans it is indistinguishable in presentation from a Player (convincing Display Name, same body/avatar); internally it remains a Bot. Bots use limited vision/memory for Crown tracking (not omniscient).
 _Avoid_: NPC, AI, Dummy, Fake player
 
 **Fighter**:

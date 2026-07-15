@@ -1,5 +1,5 @@
 /** Bumped when tweakable content that clients must agree on changes. */
-export const CONTENT_REVISION = '3';
+export const CONTENT_REVISION = '4';
 
 /** Default Cap for an Arena (ADR domain). */
 export const CAP = 12;
@@ -140,4 +140,18 @@ export const PEDESTAL = {
   topRadius: 1.2,
   bottomRadius: 1.4,
   height: 0.35,
+} as const;
+
+/**
+ * Bot private vision / memory (ADR 0004) — sim-only; not on the wire.
+ * Soft center bias blends roam waypoints toward Crown Spawn.
+ */
+export const BOT_VISION = {
+  range: 28,
+  fovDeg: 120,
+  memorySeconds: 3.5,
+  hearRadius: 18,
+  hearMemorySeconds: 2,
+  holderAwarenessRange: 14,
+  softCenterBias: 0.25,
 } as const;

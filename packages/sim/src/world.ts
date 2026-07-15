@@ -1,6 +1,7 @@
 import {
   ARENA_SIZE,
   BOT_NAMES,
+  BOT_VISION,
   CAP,
   CLAIM_RADIUS,
   CROWN_SPAWN,
@@ -37,6 +38,15 @@ type DummyPatrol = {
   nearCrown: boolean;
 };
 
+/** Private bot sense — not on the wire / snapshot. */
+type BotSense = {
+  mode: 'roam' | 'investigate' | 'chase' | 'flee';
+  lastX: number;
+  lastZ: number;
+  memoryRemaining: number;
+  roamIndex: number;
+};
+
 type FighterState = {
   id: string;
   kind: FighterKind;
@@ -56,7 +66,21 @@ type FighterState = {
   input: FighterInput;
   lastInputSeq: number;
   dummy?: DummyPatrol;
+  bot?: BotSense;
 };
+
+/** Roam targets: fighter spawns + soft ring around Crown Spawn. */
+const ROAM_WAYPOINTS: readonly { x: number; z: number }[] = [
+  ...FIGHTER_SPAWNS.map((s) => ({ x: s.x, z: s.z })),
+  { x: 8, z: 0 },
+  { x: 5.66, z: 5.66 },
+  { x: 0, z: 8 },
+  { x: -5.66, z: 5.66 },
+  { x: -8, z: 0 },
+  { x: -5.66, z: -5.66 },
+  { x: 0, z: -8 },
+  { x: 5.66, z: -5.66 },
+];
 
 const EMPTY_INPUT: FighterInput = {
   forward: 0,
@@ -76,6 +100,69 @@ function distXZ(ax: number, az: number, bx: number, bz: number): number {
 /** Yaw so forward (-sin yaw, -cos yaw) points toward (tx, tz). */
 function yawToward(fx: number, fz: number, tx: number, tz: number): number {
   return Math.atan2(fx - tx, fz - tz);
+}
+
+/** Deterministic roam start index from fighter id (no Math.random). */
+function roamIndexFromId(id: string): number {
+  let sum = 0;
+  for (let i = 0; i < id.length; i++) sum += id.charCodeAt(i);
+  return sum % ROAM_WAYPOINTS.length;
+}
+
+/** Liang–Barsky: true if XZ segment intersects axis-aligned box. */
+function segmentIntersectsAabb(
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+  minX: number,
+  maxX: number,
+  minZ: number,
+  maxZ: number,
+): boolean {
+  let t0 = 0;
+  let t1 = 1;
+  const dx = bx - ax;
+  const dz = bz - az;
+  const p = [-dx, dx, -dz, dz];
+  const q = [ax - minX, maxX - ax, az - minZ, maxZ - az];
+  for (let i = 0; i < 4; i++) {
+    const pi = p[i]!;
+    const qi = q[i]!;
+    if (pi === 0) {
+      if (qi < 0) return false;
+    } else {
+      const r = qi / pi;
+      if (pi < 0) {
+        if (r > t1) return false;
+        if (r > t0) t0 = r;
+      } else {
+        if (r < t0) return false;
+        if (r < t1) t1 = r;
+      }
+    }
+  }
+  return t0 <= t1;
+}
+
+/** True if the XZ segment is blocked by any obstacle footprint. */
+function segmentHitsObstacle(
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+): boolean {
+  const pad = 0.05;
+  for (const o of OBSTACLES) {
+    const minX = o.x - o.w / 2 - pad;
+    const maxX = o.x + o.w / 2 + pad;
+    const minZ = o.z - o.d / 2 - pad;
+    const maxZ = o.z + o.d / 2 + pad;
+    if (segmentIntersectsAabb(ax, az, bx, bz, minX, maxX, minZ, maxZ)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function clampToArena(f: FighterState): void {
@@ -272,6 +359,7 @@ export class World {
         input: old ? { ...old.input } : { ...EMPTY_INPUT, yaw: s.yaw },
         lastInputSeq: s.lastInputSeq,
         dummy: old?.dummy,
+        bot: old?.bot,
       };
     });
   }
@@ -402,6 +490,17 @@ export class World {
       radius: PHYSICS.playerRadius,
       input: { ...EMPTY_INPUT, yaw },
       lastInputSeq: 0,
+      ...(kind === 'bot'
+        ? {
+            bot: {
+              mode: 'roam' as const,
+              lastX: CROWN_SPAWN.x,
+              lastZ: CROWN_SPAWN.z,
+              memoryRemaining: 0,
+              roamIndex: roamIndexFromId(id),
+            },
+          }
+        : {}),
     });
   }
 
@@ -419,8 +518,8 @@ export class World {
   }
 
   /**
-   * ADR 0004 chase AI: Claim free Crown, chase Holder + Hit in range, flee when holding.
-   * Flee steers into open space (not straight into perimeter walls).
+   * ADR 0004: private vision + memory. Hard-chase only after seeing Crown/Holder
+   * (or hearing nearby Claim/Steal); otherwise roam with soft center bias.
    */
   private applyBotAi(f: FighterState): void {
     if (f.stunRemaining > 0) {
@@ -428,6 +527,93 @@ export class World {
       return;
     }
 
+    if (!f.bot) {
+      f.bot = {
+        mode: 'roam',
+        lastX: CROWN_SPAWN.x,
+        lastZ: CROWN_SPAWN.z,
+        memoryRemaining: 0,
+        roamIndex: roamIndexFromId(f.id),
+      };
+    }
+    const sense = f.bot;
+    sense.memoryRemaining = Math.max(0, sense.memoryRemaining - FIXED_DT);
+
+    // --- Mode transitions ---
+    if (this.holderId === f.id) {
+      sense.mode = 'flee';
+      let nearest: FighterState | null = null;
+      let nearestDist = Infinity;
+      for (const o of this.fighters) {
+        if (o.id === f.id) continue;
+        const d = distXZ(f.x, f.z, o.x, o.z);
+        if (d <= BOT_VISION.holderAwarenessRange && d < nearestDist) {
+          nearestDist = d;
+          nearest = o;
+        }
+      }
+      if (nearest) {
+        sense.lastX = nearest.x;
+        sense.lastZ = nearest.z;
+      }
+    } else {
+      let seesTarget = false;
+      if (this.holderId === null) {
+        seesTarget = this.canSee(f, CROWN_SPAWN.x, CROWN_SPAWN.z);
+        if (seesTarget) {
+          sense.lastX = CROWN_SPAWN.x;
+          sense.lastZ = CROWN_SPAWN.z;
+        }
+      } else {
+        const holder = this.fighters.find((x) => x.id === this.holderId);
+        if (holder && this.canSee(f, holder.x, holder.z)) {
+          seesTarget = true;
+          sense.lastX = holder.x;
+          sense.lastZ = holder.z;
+        }
+      }
+
+      if (seesTarget) {
+        sense.mode = 'chase';
+        sense.memoryRemaining = BOT_VISION.memorySeconds;
+      } else if (sense.memoryRemaining > 0) {
+        sense.mode = 'investigate';
+      } else {
+        sense.mode = 'roam';
+      }
+    }
+
+    // --- Steer by mode ---
+    if (sense.mode === 'roam') {
+      this.steerBotRoam(f, sense);
+      return;
+    }
+
+    if (sense.mode === 'investigate') {
+      const dist = distXZ(f.x, f.z, sense.lastX, sense.lastZ);
+      if (dist < 2) {
+        sense.memoryRemaining = 0;
+        sense.mode = 'roam';
+        this.steerBotRoam(f, sense);
+        return;
+      }
+      f.input = {
+        forward: 1,
+        strafe: 0,
+        yaw: yawToward(f.x, f.z, sense.lastX, sense.lastZ),
+        sprint: false,
+        jump: false,
+        hit: false,
+      };
+      return;
+    }
+
+    if (sense.mode === 'flee') {
+      this.steerBotFlee(f, sense);
+      return;
+    }
+
+    // chase
     if (this.holderId === null) {
       f.input = {
         forward: 1,
@@ -440,64 +626,149 @@ export class World {
       return;
     }
 
-    if (this.holderId === f.id) {
-      let nearest: FighterState | null = null;
-      let nearestDist = Infinity;
-      for (const o of this.fighters) {
-        if (o.id === f.id) continue;
-        const d = distXZ(f.x, f.z, o.x, o.z);
-        if (d < nearestDist) {
-          nearestDist = d;
-          nearest = o;
-        }
-      }
-      if (!nearest) {
-        f.input = { ...EMPTY_INPUT, yaw: f.yaw };
-        return;
-      }
-      // Flee away from pursuer, but pull target inward so we don't glue to walls.
-      const awayX = f.x - nearest.x;
-      const awayZ = f.z - nearest.z;
-      const awayLen = Math.hypot(awayX, awayZ) || 1;
-      let tx = f.x + (awayX / awayLen) * 8;
-      let tz = f.z + (awayZ / awayLen) * 8;
-      const softLim = ARENA_SIZE / 2 - 6;
-      tx = Math.max(-softLim, Math.min(softLim, tx));
-      tz = Math.max(-softLim, Math.min(softLim, tz));
-      // Near the wall: cut toward center first.
-      if (Math.abs(f.x) > softLim || Math.abs(f.z) > softLim) {
-        tx = CROWN_SPAWN.x;
-        tz = CROWN_SPAWN.z;
-      }
-      f.input = {
-        forward: 1,
-        strafe: 0,
-        yaw: yawToward(f.x, f.z, tx, tz),
-        sprint: true,
-        jump: false,
-        hit: false,
-      };
-      return;
-    }
-
     const holder = this.fighters.find((x) => x.id === this.holderId);
     if (!holder) {
       f.input = { ...EMPTY_INPUT, yaw: f.yaw };
       return;
     }
+    const seesHolder = this.canSee(f, holder.x, holder.z);
+    const tx = seesHolder ? holder.x : sense.lastX;
+    const tz = seesHolder ? holder.z : sense.lastZ;
     const dist = distXZ(f.x, f.z, holder.x, holder.z);
     const inRange = dist <= HIT.hitRange + holder.radius;
-    // If jammed on a wall while chasing, strafe toward center to unstick.
     const softLim = ARENA_SIZE / 2 - 5;
     const stuckOnWall = Math.abs(f.x) > softLim || Math.abs(f.z) > softLim;
     f.input = {
       forward: stuckOnWall ? 0.35 : 1,
       strafe: stuckOnWall ? Math.sign(CROWN_SPAWN.x - f.x || 1) * 0.85 : 0,
-      yaw: yawToward(f.x, f.z, holder.x, holder.z),
+      yaw: yawToward(f.x, f.z, tx, tz),
       sprint: true,
       jump: stuckOnWall,
       hit: inRange && f.hitCooldownRemaining <= 0,
     };
+  }
+
+  private steerBotRoam(f: FighterState, sense: BotSense): void {
+    let wp = ROAM_WAYPOINTS[sense.roamIndex]!;
+    if (distXZ(f.x, f.z, wp.x, wp.z) < 2) {
+      sense.roamIndex = (sense.roamIndex + 1) % ROAM_WAYPOINTS.length;
+      wp = ROAM_WAYPOINTS[sense.roamIndex]!;
+    }
+    const bias = BOT_VISION.softCenterBias;
+    const tx = wp.x * (1 - bias) + CROWN_SPAWN.x * bias;
+    const tz = wp.z * (1 - bias) + CROWN_SPAWN.z * bias;
+    f.input = {
+      forward: 0.85,
+      strafe: 0,
+      yaw: yawToward(f.x, f.z, tx, tz),
+      sprint: false,
+      jump: false,
+      hit: false,
+    };
+  }
+
+  private steerBotFlee(f: FighterState, sense: BotSense): void {
+    let nearest: FighterState | null = null;
+    let nearestDist = Infinity;
+    for (const o of this.fighters) {
+      if (o.id === f.id) continue;
+      const d = distXZ(f.x, f.z, o.x, o.z);
+      if (d <= BOT_VISION.holderAwarenessRange && d < nearestDist) {
+        nearestDist = d;
+        nearest = o;
+      }
+    }
+    if (!nearest) {
+      // Soft pull toward open center when nobody nearby.
+      f.input = {
+        forward: 0.7,
+        strafe: 0,
+        yaw: yawToward(f.x, f.z, CROWN_SPAWN.x, CROWN_SPAWN.z),
+        sprint: false,
+        jump: false,
+        hit: false,
+      };
+      return;
+    }
+    sense.lastX = nearest.x;
+    sense.lastZ = nearest.z;
+    const awayX = f.x - nearest.x;
+    const awayZ = f.z - nearest.z;
+    const awayLen = Math.hypot(awayX, awayZ) || 1;
+    let tx = f.x + (awayX / awayLen) * 8;
+    let tz = f.z + (awayZ / awayLen) * 8;
+    const softLim = ARENA_SIZE / 2 - 6;
+    tx = Math.max(-softLim, Math.min(softLim, tx));
+    tz = Math.max(-softLim, Math.min(softLim, tz));
+    if (Math.abs(f.x) > softLim || Math.abs(f.z) > softLim) {
+      tx = CROWN_SPAWN.x;
+      tz = CROWN_SPAWN.z;
+    }
+    f.input = {
+      forward: 1,
+      strafe: 0,
+      yaw: yawToward(f.x, f.z, tx, tz),
+      sprint: true,
+      jump: false,
+      hit: false,
+    };
+  }
+
+  private canSee(observer: FighterState, tx: number, tz: number): boolean {
+    const dx = tx - observer.x;
+    const dz = tz - observer.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist > BOT_VISION.range) return false;
+    if (dist < 1e-6) return true;
+    const fx = -Math.sin(observer.yaw);
+    const fz = -Math.cos(observer.yaw);
+    const nx = dx / dist;
+    const nz = dz / dist;
+    const dot = Math.max(-1, Math.min(1, fx * nx + fz * nz));
+    const halfFov = ((BOT_VISION.fovDeg * Math.PI) / 180) / 2;
+    if (Math.acos(dot) > halfFov) return false;
+    return !segmentHitsObstacle(observer.x, observer.z, tx, tz);
+  }
+
+  /**
+   * Claim/Steal noise: bots within hearRadius switch to investigate (not chase/flee).
+   */
+  private notifyBotsHeard(x: number, z: number): void {
+    for (const f of this.fighters) {
+      if (f.kind !== 'bot') continue;
+      if (!f.bot) {
+        f.bot = {
+          mode: 'roam',
+          lastX: CROWN_SPAWN.x,
+          lastZ: CROWN_SPAWN.z,
+          memoryRemaining: 0,
+          roamIndex: roamIndexFromId(f.id),
+        };
+      }
+      const sense = f.bot;
+      if (sense.mode === 'chase' || sense.mode === 'flee') continue;
+      const d = distXZ(f.x, f.z, x, z);
+      if (d > BOT_VISION.hearRadius) continue;
+      sense.mode = 'investigate';
+      sense.lastX = x;
+      sense.lastZ = z;
+      sense.memoryRemaining = BOT_VISION.hearMemorySeconds;
+    }
+  }
+
+  /** Script/test helper: place a fighter without clearing private bot sense. */
+  _testSetFighterPose(id: string, x: number, z: number, yaw: number): void {
+    const f = this.fighters.find((fighter) => fighter.id === id);
+    if (!f) return;
+    f.x = x;
+    f.y = 0;
+    f.z = z;
+    f.yaw = yaw;
+    f.vx = 0;
+    f.vy = 0;
+    f.vz = 0;
+    f.onGround = true;
+    f.input = { ...f.input, yaw };
   }
 
   private resetState(): void {
@@ -744,6 +1015,7 @@ export class World {
       this.holderId = attacker.id;
       this.graceRemaining = GRACE_DURATION;
       events.push({ type: 'stolen', fromId, toId: attacker.id });
+      this.notifyBotsHeard(attacker.x, attacker.z);
     } else {
       best.stunRemaining = HIT.stunDuration;
       let ax = best.x - attacker.x;
@@ -780,6 +1052,7 @@ export class World {
       this.holderId = best.id;
       this.graceRemaining = GRACE_DURATION;
       events.push({ type: 'claimed', fighterId: best.id });
+      this.notifyBotsHeard(best.x, best.z);
     }
     return events;
   }
