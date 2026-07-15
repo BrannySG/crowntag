@@ -1,0 +1,43 @@
+# Architecture — stay system-driven and decoupled
+
+Tweak-friendly code keeps **content**, **simulation**, **protocol**, and
+**presentation** in separate lanes.
+
+## Layers (do not cross-pollinate)
+
+| Layer | Package | Owns | Must NOT |
+|-------|---------|------|----------|
+| **Content** | `packages/content` (`@crowntag/content`) | Tuning and definitions: Cap, speeds, hit range, Stun/Knockback, spawn layout numbers, bot name lists | Runtime state, DOM, rendering, I/O, Cloudflare APIs |
+| **Protocol** | `packages/protocol` (`@crowntag/protocol`) | Wire command / event / snapshot message types shared by client and worker | Sim logic, rendering, I/O |
+| **Sim** | `packages/sim` (`@crowntag/sim`) | Authoritative Arena rules: movement/physics, Hit/Steal/Claim, Score, Bots, `step()` — runs in Arena DO and tests | Browser APIs, timers as authority, `Math.random`, Three.js, React, Workers/DO APIs |
+| **Presentation** | `apps/client` | Three.js world, prediction/reconciliation shell, HUD/Leaderboard, join UI | Mutating authoritative Arena state; importing worker/DO internals |
+| **Host** | `apps/worker` | Worker entry, Matchmaker DO, Arena DO, WebSockets, static-asset serve of client build | Three.js, DOM, client source |
+
+## Commands in, events out
+
+- Reach authoritative Arena state only by sending protocol commands into the sim
+  (locally for prediction, over the wire to the Arena DO for authority).
+- Presentation reacts to events and snapshots. Removing a VFX/SFX/HUD reaction
+  must never change outcomes.
+- Client may import `@crowntag/sim` for prediction; the Arena DO is the authority.
+
+## Content is data-driven
+
+- Speeds, ranges, Cap, Stun/Knockback, spawn positions, bot names → edit
+  `@crowntag/content`, not sim logic.
+- No hardcoded tweak numbers in sim systems or client components — if a tweak
+  requires a sim code change, ask whether it belongs in content.
+
+## Coupling smells to reject
+
+- Sim importing from `apps/client`, `apps/worker`, Three.js, DOM, or CF APIs.
+- Client importing worker/DO modules or writing authoritative Fighter/Crown/Score state.
+- `Math.random` anywhere in `packages/sim` (breaks seeded determinism / tests).
+- Protocol importing sim or client (types only; sim may depend on protocol).
+
+## Before merging
+
+1. Can this be a **content-only** change?
+2. Does every new authoritative behavior have a **command + event** (or pure presentation)?
+3. Did presentation stay removable (deleting it changes nothing authoritative)?
+4. If you bent a boundary, note it in `docs/adr/`.
