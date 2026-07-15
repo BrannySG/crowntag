@@ -76,6 +76,125 @@
         text-align: center;
       }
       #hint.hidden { display: none; }
+      #stamina {
+        position: absolute;
+        left: 50%;
+        bottom: 64px;
+        transform: translateX(-50%);
+        display: grid;
+        grid-template-columns: 36px 1fr;
+        grid-template-rows: auto auto;
+        column-gap: 12px;
+        row-gap: 4px;
+        align-items: center;
+        width: min(380px, 78vw);
+        padding: 12px 14px 10px;
+        background: rgba(8, 10, 16, 0.72);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 14px;
+        box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
+        pointer-events: none;
+        --stamina-ratio: 1;
+      }
+      #stamina-icon {
+        grid-column: 1;
+        grid-row: 1 / span 2;
+        width: 34px;
+        height: 34px;
+        justify-self: center;
+        filter: drop-shadow(0 1px 3px #000);
+        transition: filter 120ms ease, opacity 120ms ease;
+      }
+      #stamina-track {
+        grid-column: 2;
+        grid-row: 1;
+        position: relative;
+        width: 100%;
+        height: 28px;
+        border-radius: 9px;
+        overflow: hidden;
+      }
+      #stamina-container {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: fill;
+        z-index: 1;
+        pointer-events: none;
+      }
+      #stamina-fill-wrap {
+        position: absolute;
+        left: 4px;
+        right: 4px;
+        top: 5px;
+        bottom: 5px;
+        z-index: 2;
+        border-radius: 5px;
+        overflow: hidden;
+        transform: scaleX(var(--stamina-ratio));
+        transform-origin: left center;
+        transition: transform 70ms linear;
+        background: #fdaf18;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+      }
+      #stamina-fill {
+        display: block;
+        width: 100%;
+        height: 100%;
+        object-fit: fill;
+        object-position: left center;
+      }
+      #stamina-meta {
+        grid-column: 2;
+        grid-row: 2;
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        padding: 0 2px;
+      }
+      #stamina-label {
+        font-size: 11px;
+        letter-spacing: 0.16em;
+        color: #f5c542;
+        text-transform: uppercase;
+        text-shadow: 0 1px 3px #000;
+      }
+      #stamina-value {
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+        color: #e8e8ef;
+        text-shadow: 0 1px 2px #000;
+      }
+      #stamina.unlimited {
+        border-color: rgba(245, 197, 66, 0.5);
+      }
+      #stamina.unlimited #stamina-fill-wrap {
+        background: linear-gradient(180deg, #ffe08a 0%, #f5c542 55%, #d4a017 100%);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 0 10px rgba(245, 197, 66, 0.35);
+      }
+      #stamina.unlimited #stamina-label,
+      #stamina.unlimited #stamina-value {
+        color: #ffe08a;
+      }
+      #stamina.low #stamina-fill-wrap {
+        background: linear-gradient(180deg, #ff9a6b 0%, #e05a3c 55%, #b83a22 100%);
+      }
+      #stamina.low #stamina-label,
+      #stamina.low #stamina-value {
+        color: #e07a5f;
+      }
+      #stamina.empty #stamina-fill-wrap {
+        opacity: 0;
+      }
+      #stamina.empty #stamina-label,
+      #stamina.empty #stamina-value {
+        color: #9a9aa8;
+      }
+      #stamina.empty #stamina-icon {
+        filter: grayscale(1) brightness(0.7) drop-shadow(0 1px 2px #000);
+        opacity: 0.75;
+      }
       #controls {
         position: absolute;
         right: 16px;
@@ -200,7 +319,20 @@
         <div class="lb-title">Leaderboard</div>
         <ol id="leaderboard-list"></ol>
       </div>
-      <div id="hint" class="hidden">Click to capture mouse · WASD move · Shift sprint · Space jump · Click hit</div>
+      <div id="stamina" aria-label="Stamina">
+        <img id="stamina-icon" src="/hud/stamina-icon.svg" alt="" />
+        <div id="stamina-track">
+          <img id="stamina-container" src="/hud/stamina-container.svg" alt="" />
+          <div id="stamina-fill-wrap">
+            <img id="stamina-fill" src="/hud/stamina-fill.svg" alt="" />
+          </div>
+        </div>
+        <div id="stamina-meta">
+          <span id="stamina-label">STAMINA</span>
+          <span id="stamina-value">100%</span>
+        </div>
+      </div>
+      <div id="hint" class="hidden">Click to capture mouse · WASD move · Shift sprint (stamina) · Space jump · Click hit</div>
       <div id="controls">
         <span id="mode-label">Hosted arena</span><br />
         Claim by proximity · Steal with Hit

@@ -45,6 +45,8 @@ export type FighterSnapshot = {
   stunRemaining: number;
   hitCooldownRemaining: number;
   score: number;
+  /** Remaining sprint stamina (0..STAMINA.max). */
+  stamina: number;
   /** Last input seq consumed by authority for this Fighter (players). */
   lastInputSeq: number;
 };

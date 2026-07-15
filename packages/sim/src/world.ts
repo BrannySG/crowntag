@@ -4,6 +4,7 @@ import {
   BOT_VISION,
   CAP,
   CLAIM_RADIUS,
+  COLLISION,
   CROWN_SPAWN,
   FIGHTER_SPAWNS,
   GRACE_DURATION,
@@ -13,6 +14,7 @@ import {
   PHYSICS,
   PLAYER_SPAWN_INDEX,
   SCORE_PER_SECOND,
+  STAMINA,
   TICK_HZ,
 } from '@crowntag/content';
 import type {
@@ -62,6 +64,9 @@ type FighterState = {
   stunRemaining: number;
   hitCooldownRemaining: number;
   score: number;
+  stamina: number;
+  /** After stamina hits 0, locked until regen reaches STAMINA.minToSprint. */
+  staminaLocked: boolean;
   radius: number;
   input: FighterInput;
   lastInputSeq: number;
@@ -339,6 +344,7 @@ export class World {
     const prev = new Map(this.fighters.map((f) => [f.id, f]));
     this.fighters = snap.fighters.map((s) => {
       const old = prev.get(s.id);
+      const stamina = s.stamina ?? STAMINA.max;
       return {
         id: s.id,
         kind: s.kind,
@@ -354,6 +360,10 @@ export class World {
         stunRemaining: s.stunRemaining,
         hitCooldownRemaining: s.hitCooldownRemaining,
         score: s.score,
+        stamina,
+        staminaLocked:
+          stamina <= 0 ||
+          ((old?.staminaLocked ?? false) && stamina < STAMINA.minToSprint),
         radius:
           s.kind === 'dummy' ? PHYSICS.dummyRadius : PHYSICS.playerRadius,
         input: old ? { ...old.input } : { ...EMPTY_INPUT, yaw: s.yaw },
@@ -396,6 +406,8 @@ export class World {
       }
     }
 
+    this.resolveFighterCollisions();
+
     for (const f of this.fighters) {
       if (f.kind !== 'dummy' && f.input.hit) {
         events.push(...this.resolveHit(f));
@@ -431,6 +443,7 @@ export class World {
       stunRemaining: f.stunRemaining,
       hitCooldownRemaining: f.hitCooldownRemaining,
       score: f.score,
+      stamina: f.stamina,
       lastInputSeq: f.lastInputSeq,
     }));
 
@@ -487,6 +500,8 @@ export class World {
       stunRemaining: 0,
       hitCooldownRemaining: 0,
       score: 0,
+      stamina: STAMINA.max,
+      staminaLocked: false,
       radius: PHYSICS.playerRadius,
       input: { ...EMPTY_INPUT, yaw },
       lastInputSeq: 0,
@@ -806,6 +821,8 @@ export class World {
         stunRemaining: 0,
         hitCooldownRemaining: 0,
         score: 0,
+        stamina: STAMINA.max,
+        staminaLocked: false,
         radius: PHYSICS.playerRadius,
         input: { ...EMPTY_INPUT, yaw: playerYaw },
         lastInputSeq: 0,
@@ -855,6 +872,8 @@ export class World {
       stunRemaining: 0,
       hitCooldownRemaining: 0,
       score: 0,
+      stamina: STAMINA.max,
+      staminaLocked: false,
       radius: PHYSICS.dummyRadius,
       input: { ...EMPTY_INPUT },
       lastInputSeq: 0,
@@ -868,16 +887,117 @@ export class World {
     };
   }
 
+  private resolveFighterCollisions(): void {
+    const list = this.fighters;
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
+        const a = list[i]!;
+        const b = list[j]!;
+        const dx = b.x - a.x;
+        const dz = b.z - a.z;
+        let dist = Math.hypot(dx, dz);
+        const minDist = a.radius + b.radius;
+        if (dist >= minDist) continue;
+
+        let nx: number;
+        let nz: number;
+        if (dist < 1e-8) {
+          nx = a.id < b.id ? 1 : -1;
+          nz = 0;
+          dist = 1e-8;
+        } else {
+          nx = dx / dist;
+          nz = dz / dist;
+        }
+
+        const overlap = minDist - dist;
+        const push = overlap * COLLISION.separation * 0.5;
+        a.x -= nx * push;
+        a.z -= nz * push;
+        b.x += nx * push;
+        b.z += nz * push;
+
+        const closing = (b.vx - a.vx) * nx + (b.vz - a.vz) * nz;
+        if (closing < 0) {
+          const half = -closing * COLLISION.normalFriction * 0.5;
+          a.vx -= nx * half;
+          a.vz -= nz * half;
+          b.vx += nx * half;
+          b.vz += nz * half;
+        }
+
+        // Damp residual / knockback velocity while packed (input rebuilds vx next tick).
+        const damp =
+          1 - Math.min(1, overlap / minDist) * COLLISION.crowdSlow;
+        a.vx *= damp;
+        a.vz *= damp;
+        b.vx *= damp;
+        b.vz *= damp;
+
+        clampToArena(a);
+        resolveObstacles(a);
+        clampToArena(b);
+        resolveObstacles(b);
+      }
+    }
+  }
+
+  /** 0 = free, 1 = fully nested in another fighter's radius sum. */
+  private crowdOverlapFactor(f: FighterState): number {
+    let maxOverlap = 0;
+    for (const o of this.fighters) {
+      if (o.id === f.id) continue;
+      const minDist = f.radius + o.radius;
+      const d = distXZ(f.x, f.z, o.x, o.z);
+      if (d >= minDist) continue;
+      maxOverlap = Math.max(maxOverlap, (minDist - d) / minDist);
+    }
+    return maxOverlap;
+  }
+
   private stepPlayer(f: FighterState, dt: number): void {
     const stunned = f.stunRemaining > 0;
     f.yaw = f.input.yaw;
 
     let inputF = stunned ? 0 : f.input.forward;
     let inputR = stunned ? 0 : f.input.strafe;
-    const sprinting = !stunned && f.input.sprint;
-    const holderMult = this.holderId === f.id ? MOVEMENT.holderSpeedMult : 1;
+    const isHolder = this.holderId === f.id;
+    let sprinting = false;
+    if (isHolder) {
+      f.stamina = STAMINA.max;
+      f.staminaLocked = false;
+      sprinting = !stunned && f.input.sprint;
+    } else {
+      const wantSprint =
+        !stunned && f.input.sprint && !f.staminaLocked && f.stamina > 0;
+      sprinting = wantSprint;
+      if (sprinting) {
+        f.stamina = Math.max(0, f.stamina - STAMINA.drainPerSecond * dt);
+        if (f.stamina <= 0) {
+          f.stamina = 0;
+          f.staminaLocked = true;
+        }
+      } else if (!f.input.sprint) {
+        // Only regen after releasing sprint — holding Shift while empty stays empty.
+        f.stamina = Math.min(
+          STAMINA.max,
+          f.stamina + STAMINA.regenPerSecond * dt,
+        );
+        if (f.staminaLocked && f.stamina >= STAMINA.minToSprint) {
+          f.staminaLocked = false;
+        }
+      }
+    }
+    const holderMult = isHolder ? MOVEMENT.holderSpeedMult : 1;
+    // Holder still bumps, but packs jam each other harder than they trap the Crown.
+    const crowdWeight = isHolder ? 0.35 : 1;
+    const crowdMult =
+      1 - this.crowdOverlapFactor(f) * COLLISION.crowdSlow * crowdWeight;
     const speed =
-      MOVEMENT.moveSpeed * (sprinting ? MOVEMENT.sprintMult : 1) * holderMult;
+      MOVEMENT.moveSpeed *
+      (sprinting ? MOVEMENT.sprintMult : 1) *
+      holderMult *
+      crowdMult;
 
     if (inputF !== 0 || inputR !== 0) {
       const len = Math.hypot(inputF, inputR);

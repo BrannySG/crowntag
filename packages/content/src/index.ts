@@ -1,5 +1,5 @@
 /** Bumped when tweakable content that clients must agree on changes. */
-export const CONTENT_REVISION = '4';
+export const CONTENT_REVISION = '5';
 
 /** Default Cap for an Arena (ADR domain). */
 export const CAP = 12;
@@ -66,6 +66,28 @@ export const PHYSICS = {
   dummyRadius: 0.5,
   /** Extra inset from arena walls when clamping. */
   wallMargin: 0.3,
+} as const;
+
+/** Sprint stamina (non-Holder). Holder sprint is unlimited. */
+export const STAMINA = {
+  max: 3.25,
+  drainPerSecond: 1,
+  regenPerSecond: 0.6,
+  /** After hitting 0, must regen to this before sprint can start again */
+  minToSprint: 0.35,
+} as const;
+
+/** Soft fighter–fighter body collision after movement. */
+export const COLLISION = {
+  /** How hard overlapping fighters push apart (fraction of overlap corrected per pair) */
+  separation: 0.85,
+  /** Fraction of closing relative velocity cancelled along contact normal (0–1) */
+  normalFriction: 0.85,
+  /**
+   * Max move-speed penalty while overlapping another fighter (0–1).
+   * Applied in step from live overlap so input-driven velocity still slows in a crowd.
+   */
+  crowdSlow: 0.55,
 } as const;
 
 /** Hold-time Score: 1 second held → 1 score. */

@@ -1,3 +1,4 @@
+import { STAMINA } from '@crowntag/content';
 import { createOfflineWorld, FIXED_DT } from '@crowntag/sim';
 import { startMusic } from './audio/music';
 import { createArenaScene } from './scene';
@@ -12,6 +13,9 @@ const holderEl = document.getElementById('holder');
 const scoreEl = document.getElementById('score');
 const leaderboardList = document.getElementById('leaderboard-list');
 const hintEl = document.getElementById('hint');
+const staminaRoot = document.getElementById('stamina');
+const staminaLabel = document.getElementById('stamina-label');
+const staminaValue = document.getElementById('stamina-value');
 const joinEl = document.getElementById('join');
 const nameInput = document.getElementById('display-name') as HTMLInputElement | null;
 const joinBtn = document.getElementById('join-btn');
@@ -77,7 +81,7 @@ async function tryJoin() {
     }
     if (hintEl) {
       hintEl.textContent =
-        'Click to capture mouse · WASD move · Shift sprint · Space jump · Click hit';
+        'Click to capture mouse · WASD move · Shift sprint (stamina) · Space jump · Click hit';
       hintEl.classList.remove('hidden');
     }
     startOnline(net);
@@ -177,7 +181,13 @@ function startOnline(net: NetClient) {
 function updateHud(
   snap: {
     crown: { holderId: string | null };
-    fighters: { id: string; displayName: string; score: number; kind?: string }[];
+    fighters: {
+      id: string;
+      displayName: string;
+      score: number;
+      stamina?: number;
+      kind?: string;
+    }[];
   },
   localId: string,
 ) {
@@ -191,7 +201,23 @@ function updateHud(
     }
   }
   if (scoreEl && local) scoreEl.textContent = local.score.toFixed(1);
+  updateStaminaHud(local?.stamina ?? STAMINA.max, snap.crown.holderId === localId);
   updateLeaderboard(snap, localId);
+}
+
+function updateStaminaHud(stamina: number, isHolder: boolean) {
+  if (!staminaRoot) return;
+  const ratio = isHolder ? 1 : Math.max(0, Math.min(1, stamina / STAMINA.max));
+  staminaRoot.style.setProperty('--stamina-ratio', String(ratio));
+  staminaRoot.classList.toggle('unlimited', isHolder);
+  staminaRoot.classList.toggle('low', !isHolder && ratio > 0 && ratio < 0.25);
+  staminaRoot.classList.toggle('empty', !isHolder && ratio <= 0.001);
+  if (staminaLabel) {
+    staminaLabel.textContent = isHolder ? 'SPRINT ∞' : 'STAMINA';
+  }
+  if (staminaValue) {
+    staminaValue.textContent = isHolder ? 'MAX' : `${Math.round(ratio * 100)}%`;
+  }
 }
 
 /** Rank Fighters (Players + Bots) by Score — ADR 0004 / CONTEXT Leaderboard. */

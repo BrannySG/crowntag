@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 24" preserveAspectRatio="none" width="128" height="24">
+  <!-- Outer frame -->
+  <rect x="0" y="0" width="128" height="24" rx="8" ry="8" fill="#15222c"/>
+  <!-- Inner well (empty track) -->
+  <rect x="4" y="4" width="120" height="16" rx="5" ry="5" fill="#0b1218"/>
+  <!-- Subtle inner lip -->
+  <rect x="4" y="4" width="120" height="16" rx="5" ry="5" fill="none" stroke="#3a5160" stroke-width="1.5"/>
+</svg>
