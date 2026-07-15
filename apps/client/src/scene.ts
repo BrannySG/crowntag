@@ -8,6 +8,12 @@ import {
   WALL_HEIGHT,
 } from '@crowntag/content';
 import type { ArenaSnapshot, FighterSnapshot } from '@crowntag/protocol';
+import {
+  createFighterVisual,
+  isFighterModelReady,
+  prefetchFighterModel,
+  type FighterVisual,
+} from './fighterVisual';
 import groundGrassObjUrl from './assets/models/nature-kit/ground_grass.obj';
 import groundGrassMtlUrl from './assets/models/nature-kit/ground_grass.mtl';
 import cliffBlockStoneObjUrl from './assets/models/nature-kit/cliff_block_stone.obj';
@@ -64,6 +70,7 @@ export function createArenaScene(container: HTMLElement): ArenaScene {
   let disposed = false;
   const natureDisposables: Array<{ dispose(): void }> = [];
   void loadNatureFoundation();
+  void prefetchFighterModel();
 
   async function loadNatureFoundation() {
     let groundModel: THREE.Group;
@@ -177,10 +184,14 @@ export function createArenaScene(container: HTMLElement): ArenaScene {
   crown.castShadow = true;
   scene.add(crown);
 
-  const fighterMeshes = new Map<
-    string,
-    { body: THREE.Mesh; mat: THREE.MeshStandardMaterial; label: THREE.Sprite }
-  >();
+  type FighterEntry = {
+    root: THREE.Group;
+    visual: FighterVisual;
+    label: THREE.Sprite;
+    placeholder: boolean;
+  };
+
+  const fighterMeshes = new Map<string, FighterEntry>();
 
   const dummyMats: Record<string, number> = {
     'dummy-1': 0xc44,
@@ -204,25 +215,37 @@ export function createArenaScene(container: HTMLElement): ArenaScene {
   function ensureFighter(f: FighterSnapshot, localId: string) {
     let entry = fighterMeshes.get(f.id);
     if (entry) return entry;
-    const mat = new THREE.MeshStandardMaterial({ color: colorFor(f, localId) });
-    const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.4, 0.9, 4, 8), mat);
-    body.castShadow = true;
-    scene.add(body);
+    const visual = createFighterVisual();
+    scene.add(visual.root);
     const label = makeLabel(f.displayName);
     scene.add(label);
-    entry = { body, mat, label };
+    entry = {
+      root: visual.root,
+      visual,
+      label,
+      placeholder: Boolean(visual.isPlaceholder) || !isFighterModelReady(),
+    };
     fighterMeshes.set(f.id, entry);
     return entry;
+  }
+
+  function upgradeFighterVisual(entry: FighterEntry) {
+    scene.remove(entry.root);
+    entry.visual.dispose();
+    const visual = createFighterVisual();
+    scene.add(visual.root);
+    entry.root = visual.root;
+    entry.visual = visual;
+    entry.placeholder = Boolean(visual.isPlaceholder);
   }
 
   function pruneFighters(snap: ArenaSnapshot) {
     const alive = new Set(snap.fighters.map((f) => f.id));
     for (const [id, entry] of fighterMeshes) {
       if (alive.has(id)) continue;
-      scene.remove(entry.body);
+      scene.remove(entry.root);
       scene.remove(entry.label);
-      entry.body.geometry.dispose();
-      entry.mat.dispose();
+      entry.visual.dispose();
       fighterMeshes.delete(id);
       assignedColors.delete(id);
     }
@@ -281,6 +304,10 @@ export function createArenaScene(container: HTMLElement): ArenaScene {
 
     for (const f of snap.fighters) {
       const entry = ensureFighter(f, localFighterId);
+      if (entry.placeholder && isFighterModelReady()) {
+        upgradeFighterVisual(entry);
+      }
+
       const isLocal = f.id === localFighterId;
       const extrap = isLocal ? Math.min(Math.max(dt, 0), 0.05) : 0;
       const target = {
@@ -298,14 +325,12 @@ export function createArenaScene(container: HTMLElement): ArenaScene {
         smoothToward(pose, target, dt);
       }
 
-      entry.body.position.set(pose.x, 0.9 + pose.y, pose.z);
-      entry.body.rotation.y = pose.yaw;
+      entry.root.position.set(pose.x, pose.y, pose.z);
+      entry.root.rotation.y = pose.yaw;
       entry.label.position.set(pose.x, 2.05 + pose.y, pose.z);
       const holding = snap.crown.holderId === f.id;
-      if (holding) entry.mat.color.setHex(0xf5c542);
-      else entry.mat.color.setHex(colorFor(f, localFighterId));
-      if (f.stunRemaining > 0) entry.mat.emissive.setHex(0x442200);
-      else entry.mat.emissive.setHex(0x000000);
+      const tintColor = holding ? 0xf5c542 : colorFor(f, localFighterId);
+      entry.visual.update(f, { holding, tintColor }, dt);
 
       if (isLocal) localDisplay = pose;
     }
@@ -355,6 +380,12 @@ export function createArenaScene(container: HTMLElement): ArenaScene {
       disposed = true;
       for (const d of natureDisposables) d.dispose();
       natureDisposables.length = 0;
+      for (const entry of fighterMeshes.values()) {
+        scene.remove(entry.root);
+        scene.remove(entry.label);
+        entry.visual.dispose();
+      }
+      fighterMeshes.clear();
       removeEventListener('resize', resize);
       renderer.dispose();
       container.removeChild(renderer.domElement);

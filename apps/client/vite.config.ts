@@ -6,8 +6,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   root: '.',
-  // Nature Kit models are imported directly (see model-assets.d.ts) as asset URLs for OBJLoader/MTLLoader.
-  assetsInclude: ['**/*.obj', '**/*.mtl'],
+  // Nature Kit OBJ/MTL and character GLBs are imported as asset URLs (see model-assets.d.ts).
+  assetsInclude: ['**/*.obj', '**/*.mtl', '**/*.glb'],
   server: {
     port: 5173,
     proxy: {
