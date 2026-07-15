@@ -26,6 +26,43 @@
       }
       #hud-top .dim { color: #9a9aa8; }
       #hud-top b { color: #f5c542; font-weight: 600; }
+      #leaderboard {
+        position: absolute;
+        top: 16px;
+        right: 16px;
+        min-width: 160px;
+        max-width: 220px;
+        padding: 10px 12px;
+        background: rgba(0, 0, 0, 0.45);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+      #leaderboard .lb-title {
+        color: #9a9aa8;
+        font-size: 11px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        margin-bottom: 6px;
+      }
+      #leaderboard ol {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+      #leaderboard li {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 2px 0;
+        color: #e8e8ef;
+      }
+      #leaderboard li.you .lb-name { color: #3d8bfd; }
+      #leaderboard li.holder .lb-name { color: #f5c542; }
+      #leaderboard .lb-score {
+        color: #9a9aa8;
+        font-variant-numeric: tabular-nums;
+      }
       #hint {
         position: absolute;
         left: 50%;
@@ -137,7 +174,7 @@
     <div id="join">
       <div id="join-card">
         <h1>Crown Tag</h1>
-        <p>Enter a Display Name to Join the Arena. Open a second browser tab to play with another client.</p>
+        <p>Enter a Display Name to Join. Bots fill the Arena toward Cap; open another tab for a second Player.</p>
         <label for="display-name">Display Name</label>
         <input id="display-name" type="text" maxlength="24" placeholder="e.g. CapRunner" autocomplete="off" />
         <button id="join-btn" type="button">Join Arena</button>
@@ -149,6 +186,10 @@
       <div id="hud-top">
         <div><span class="dim">holder</span> <b id="holder">—</b></div>
         <div><span class="dim">score</span> <span id="score">0.0</span></div>
+      </div>
+      <div id="leaderboard">
+        <div class="lb-title">Leaderboard</div>
+        <ol id="leaderboard-list"></ol>
       </div>
       <div id="hint" class="hidden">Click to capture mouse · WASD move · Shift sprint · Space jump · Click hit</div>
       <div id="controls">

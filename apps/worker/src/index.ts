@@ -58,6 +58,7 @@ export class Matchmaker extends DurableObject<Env> {
 
 /**
  * Authoritative Arena: Hibernation WebSocket API + 20 Hz sim tick while occupied.
+ * Bots fill toward Cap while ≥1 human is present (ADR 0004).
  */
 export class Arena extends DurableObject<Env> {
   private world: World = createArenaWorld();
@@ -75,7 +76,10 @@ export class Arena extends DurableObject<Env> {
           this.world.addPlayer(att.fighterId, att.displayName);
         }
       }
-      if (this.ctx.getWebSockets().length > 0) this.ensureTicking();
+      if (this.ctx.getWebSockets().length > 0) {
+        this.world.fillBotsTowardCap(CAP);
+        this.ensureTicking();
+      }
     });
   }
 
@@ -86,8 +90,12 @@ export class Arena extends DurableObject<Env> {
     }
 
     const displayName = (url.searchParams.get('name') ?? 'Player').trim().slice(0, 24) || 'Player';
+
+    // Cap includes Bots: despawn a Bot to free a slot when full (ADR 0004).
     if (this.world.getFighterCount() >= CAP) {
-      return new Response('Arena full', { status: 503 });
+      if (!this.world.despawnBotForPlayerJoin()) {
+        return new Response('Arena full', { status: 503 });
+      }
     }
 
     const pair = new WebSocketPair();
@@ -96,12 +104,15 @@ export class Arena extends DurableObject<Env> {
 
     this.fighterSeq += 1;
     const fighterId = `p-${this.fighterSeq}`;
-    this.world.addPlayer(fighterId, displayName);
+    if (!this.world.addPlayer(fighterId, displayName)) {
+      return new Response('Arena full', { status: 503 });
+    }
 
     this.ctx.acceptWebSocket(server);
     const attachment: Attachment = { fighterId, displayName };
     server.serializeAttachment(attachment);
 
+    this.world.fillBotsTowardCap(CAP);
     this.ensureTicking();
 
     const welcome: ServerMessage = {
@@ -159,6 +170,12 @@ export class Arena extends DurableObject<Env> {
     const removed = this.world.removeFighter(att.fighterId);
     if (removed) {
       this.broadcastEvent({ kind: 'leave', fighterId: att.fighterId });
+      if (this.world.getPlayerCount() === 0) {
+        // Last human left — despawn Bots and allow Arena idle (ADR 0004).
+        this.world.despawnAllBots();
+      } else {
+        this.world.fillBotsTowardCap(CAP);
+      }
       this.broadcastSnapshot();
     }
     this.maybeStopTicking();
@@ -182,6 +199,7 @@ export class Arena extends DurableObject<Env> {
       this.maybeStopTicking();
       return;
     }
+    // Bot chase / Claim / Hit / flee runs inside World.step (ADR 0004).
     const events = this.world.step();
     for (const ev of events) {
       const wire = simEventToWire(ev);

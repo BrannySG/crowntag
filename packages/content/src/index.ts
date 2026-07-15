@@ -1,8 +1,39 @@
 /** Bumped when tweakable content that clients must agree on changes. */
-export const CONTENT_REVISION = '1';
+export const CONTENT_REVISION = '2';
 
 /** Default Cap for an Arena (ADR domain). */
 export const CAP = 12;
+
+/**
+ * Curated Bot Display Names (ADR 0004) — human-like, no `Bot###`.
+ * Sim picks unused names when filling toward Cap.
+ */
+export const BOT_NAMES = [
+  'Mira',
+  'Jax',
+  'Nova',
+  'Reed',
+  'Sable',
+  'Kai',
+  'Luna',
+  'Orion',
+  'Vera',
+  'Ash',
+  'Piper',
+  'Cole',
+  'Riven',
+  'Tess',
+  'Quinn',
+  'Drake',
+  'Wren',
+  'Felix',
+  'Ivy',
+  'Knox',
+  'Sage',
+  'Blaze',
+  'Nina',
+  'Cruz',
+] as const;
 
 /** Authoritative / predicted tick rate (ADR 0002). */
 export const TICK_HZ = 20;

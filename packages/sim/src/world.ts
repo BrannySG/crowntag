@@ -1,5 +1,7 @@
 import {
   ARENA_SIZE,
+  BOT_NAMES,
+  CAP,
   CLAIM_RADIUS,
   CROWN_SPAWN,
   FIGHTER_SPAWNS,
@@ -70,6 +72,11 @@ function distXZ(ax: number, az: number, bx: number, bz: number): number {
   return Math.hypot(dx, dz);
 }
 
+/** Yaw so forward (-sin yaw, -cos yaw) points toward (tx, tz). */
+function yawToward(fx: number, fz: number, tx: number, tz: number): number {
+  return Math.atan2(fx - tx, fz - tz);
+}
+
 function clampToArena(f: FighterState): void {
   const half = ARENA_SIZE / 2;
   const lim = half - f.radius - PHYSICS.wallMargin;
@@ -108,6 +115,8 @@ export class World {
   private pendingInputs = new Map<string, FighterInput>();
   private pendingSeqs = new Map<string, number>();
   private nextSpawnIndex = 0;
+  private nextBotSeq = 0;
+  private nextBotNameIndex = 0;
   private readonly mode: WorldMode;
 
   constructor(mode: WorldMode = 'offline') {
@@ -121,6 +130,11 @@ export class World {
 
   getFighterCount(): number {
     return this.fighters.length;
+  }
+
+  /** Human Players only (not Bots / dummies). */
+  getPlayerCount(): number {
+    return this.fighters.filter((f) => f.kind === 'player').length;
   }
 
   send(cmd: SimCommand): void {
@@ -145,37 +159,62 @@ export class World {
 
   /**
    * Add a human Player at the next Fighter Spawn.
-   * Returns false if Cap would be exceeded (caller should reject join).
+   * Returns false if Cap would be exceeded (caller should despawn a Bot or reject join).
    */
   addPlayer(id: string, displayName: string, spawnIndex?: number): boolean {
     if (this.fighters.some((f) => f.id === id)) return false;
-    const idx =
-      spawnIndex !== undefined
-        ? spawnIndex % FIGHTER_SPAWNS.length
-        : this.nextSpawnIndex++ % FIGHTER_SPAWNS.length;
-    const spawn = FIGHTER_SPAWNS[idx]!;
-    // Face Crown Spawn (origin): forward (-sin yaw, -cos yaw) points inward.
-    const yaw = Math.atan2(spawn.x, spawn.z);
-    this.fighters.push({
-      id,
-      kind: 'player',
-      displayName,
-      x: spawn.x,
-      y: 0,
-      z: spawn.z,
-      yaw,
-      vx: 0,
-      vy: 0,
-      vz: 0,
-      onGround: true,
-      stunRemaining: 0,
-      hitCooldownRemaining: 0,
-      score: 0,
-      radius: PHYSICS.playerRadius,
-      input: { ...EMPTY_INPUT, yaw },
-      lastInputSeq: 0,
-    });
+    if (this.fighters.length >= CAP) return false;
+    this.pushFighter(id, 'player', displayName, spawnIndex);
     return true;
+  }
+
+  /**
+   * Add a Bot at the next Fighter Spawn.
+   * Returns false if Cap would be exceeded or id already present.
+   */
+  addBot(id: string, displayName: string, spawnIndex?: number): boolean {
+    if (this.fighters.some((f) => f.id === id)) return false;
+    if (this.fighters.length >= CAP) return false;
+    this.pushFighter(id, 'bot', displayName, spawnIndex);
+    return true;
+  }
+
+  /**
+   * While ≥1 human Player is present, spawn Bots until Fighter count reaches Cap.
+   * No-op when empty of humans (Arena may idle).
+   */
+  fillBotsTowardCap(cap: number = CAP): void {
+    if (this.getPlayerCount() < 1) return;
+    const limit = Math.min(cap, CAP);
+    while (this.fighters.length < limit) {
+      this.nextBotSeq += 1;
+      const id = `b-${this.nextBotSeq}`;
+      const name = this.pickBotName();
+      if (!this.addBot(id, name)) break;
+    }
+  }
+
+  /**
+   * Free a Cap slot by despawning a Bot (ADR 0004).
+   * Prefer non-Holder, then lowest Score (stable id tie-break).
+   * Returns true if a Bot was removed.
+   */
+  despawnBotForPlayerJoin(): boolean {
+    const bots = this.fighters.filter((f) => f.kind === 'bot');
+    if (bots.length === 0) return false;
+    let candidates = bots.filter((f) => f.id !== this.holderId);
+    if (candidates.length === 0) candidates = bots;
+    candidates.sort((a, b) => {
+      if (a.score !== b.score) return a.score - b.score;
+      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+    });
+    return this.removeFighter(candidates[0]!.id);
+  }
+
+  /** Remove every Bot (last human Disconnect → Arena idle). */
+  despawnAllBots(): void {
+    const ids = this.fighters.filter((f) => f.kind === 'bot').map((f) => f.id);
+    for (const id of ids) this.removeFighter(id);
   }
 
   /**
@@ -255,7 +294,10 @@ export class World {
 
     for (const f of this.fighters) {
       if (f.kind === 'dummy') this.stepDummy(f, dt);
-      else this.stepPlayer(f, dt);
+      else {
+        if (f.kind === 'bot') this.applyBotAi(f);
+        this.stepPlayer(f, dt);
+      }
     }
 
     for (const f of this.fighters) {
@@ -321,6 +363,118 @@ export class World {
     };
   }
 
+  private pushFighter(
+    id: string,
+    kind: 'player' | 'bot',
+    displayName: string,
+    spawnIndex?: number,
+  ): void {
+    const idx =
+      spawnIndex !== undefined
+        ? spawnIndex % FIGHTER_SPAWNS.length
+        : this.nextSpawnIndex++ % FIGHTER_SPAWNS.length;
+    const spawn = FIGHTER_SPAWNS[idx]!;
+    // Face Crown Spawn (origin): forward (-sin yaw, -cos yaw) points inward.
+    const yaw = Math.atan2(spawn.x, spawn.z);
+    this.fighters.push({
+      id,
+      kind,
+      displayName,
+      x: spawn.x,
+      y: 0,
+      z: spawn.z,
+      yaw,
+      vx: 0,
+      vy: 0,
+      vz: 0,
+      onGround: true,
+      stunRemaining: 0,
+      hitCooldownRemaining: 0,
+      score: 0,
+      radius: PHYSICS.playerRadius,
+      input: { ...EMPTY_INPUT, yaw },
+      lastInputSeq: 0,
+    });
+  }
+
+  private pickBotName(): string {
+    const used = new Set(this.fighters.map((f) => f.displayName));
+    for (let i = 0; i < BOT_NAMES.length; i++) {
+      const idx = (this.nextBotNameIndex + i) % BOT_NAMES.length;
+      const name = BOT_NAMES[idx]!;
+      if (!used.has(name)) {
+        this.nextBotNameIndex = (idx + 1) % BOT_NAMES.length;
+        return name;
+      }
+    }
+    return `Riley${used.size + 1}`;
+  }
+
+  /**
+   * ADR 0004 chase AI: Claim free Crown, chase Holder + Hit in range, flee when holding.
+   */
+  private applyBotAi(f: FighterState): void {
+    if (f.stunRemaining > 0) {
+      f.input = { ...EMPTY_INPUT, yaw: f.yaw };
+      return;
+    }
+
+    if (this.holderId === null) {
+      f.input = {
+        forward: 1,
+        strafe: 0,
+        yaw: yawToward(f.x, f.z, CROWN_SPAWN.x, CROWN_SPAWN.z),
+        sprint: true,
+        jump: false,
+        hit: false,
+      };
+      return;
+    }
+
+    if (this.holderId === f.id) {
+      let nearest: FighterState | null = null;
+      let nearestDist = Infinity;
+      for (const o of this.fighters) {
+        if (o.id === f.id) continue;
+        const d = distXZ(f.x, f.z, o.x, o.z);
+        if (d < nearestDist) {
+          nearestDist = d;
+          nearest = o;
+        }
+      }
+      if (!nearest) {
+        f.input = { ...EMPTY_INPUT, yaw: f.yaw };
+        return;
+      }
+      // Face away from nearest pursuer.
+      f.input = {
+        forward: 1,
+        strafe: 0,
+        yaw: Math.atan2(nearest.x - f.x, nearest.z - f.z),
+        sprint: true,
+        jump: false,
+        hit: false,
+      };
+      return;
+    }
+
+    const holder = this.fighters.find((x) => x.id === this.holderId);
+    if (!holder) {
+      f.input = { ...EMPTY_INPUT, yaw: f.yaw };
+      return;
+    }
+    const dist = distXZ(f.x, f.z, holder.x, holder.z);
+    const inRange = dist <= HIT.hitRange + holder.radius;
+    f.input = {
+      forward: 1,
+      strafe: 0,
+      yaw: yawToward(f.x, f.z, holder.x, holder.z),
+      sprint: true,
+      jump: false,
+      hit: inRange && f.hitCooldownRemaining <= 0,
+    };
+  }
+
   private resetState(): void {
     this.tick = 0;
     this.time = 0;
@@ -328,6 +482,8 @@ export class World {
     this.pendingInputs.clear();
     this.pendingSeqs.clear();
     this.nextSpawnIndex = 0;
+    this.nextBotSeq = 0;
+    this.nextBotNameIndex = 0;
 
     if (this.mode === 'arena') {
       this.fighters = [];

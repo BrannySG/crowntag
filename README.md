@@ -18,8 +18,8 @@ pnpm --filter @crowntag/client build
 pnpm dev:worker
 ```
 
-Open **two browser tabs** to http://localhost:8787 — enter different Display Names and Join.
-You should see each other move and be able to Steal the Crown.
+Open http://localhost:8787 — enter a Display Name and Join.
+With ≥1 human, **Bots fill toward Cap** (default 12), chase/Claim/flee, and appear on the on-screen **Leaderboard**. Open a second tab to Join as another Player (a Bot is despawned if the Arena is full).
 
 ### Optional: Vite + Wrangler (HMR)
 
@@ -87,6 +87,8 @@ apps/worker         # Wrangler Worker + Arena / Matchmaker DOs
 
 - **Join:** `POST /join` `{ displayName }` → Matchmaker stub always returns `arena-1` + `wsUrl` (full multi-arena Matchmaker is #17).
 - **Arena DO:** Hibernation WebSocket API; authoritative `@crowntag/sim` ticks at **20 Hz** while players are connected; Disconnect returns Crown to Crown Spawn if that Fighter was Holder.
+- **Bots (ADR 0004):** While ≥1 human is present, sim fills Fighters toward Cap with curated Display Names; Join into a full Arena despawns a Bot (prefer non-Holder, then lowest Score). Bots Claim free Crown, chase the Holder and Hit in range, or flee when holding. Last human Disconnect despawns Bots and allows the Arena to idle.
+- **Leaderboard:** Client HUD ranks Fighters (including Bots) by hold-time Score.
 - **Client:** predicts own movement; reconciles Steal / Stun / Knockback from server snapshots and events.
-- **Content** holds ADR 0005 movement/hit baselines and ADR 0003 layout.
+- **Content** holds Cap, bot name list, ADR 0005 movement/hit baselines, and ADR 0003 layout.
 - **Offline** (`?offline=1`) still runs a local World with dummies — no Worker required.

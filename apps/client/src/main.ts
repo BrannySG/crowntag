@@ -8,6 +8,7 @@ if (!app) throw new Error('#app missing');
 
 const holderEl = document.getElementById('holder');
 const scoreEl = document.getElementById('score');
+const leaderboardList = document.getElementById('leaderboard-list');
 const hintEl = document.getElementById('hint');
 const joinEl = document.getElementById('join');
 const nameInput = document.getElementById('display-name') as HTMLInputElement | null;
@@ -67,7 +68,7 @@ async function tryJoin() {
     if (modeLabel) modeLabel.textContent = `Arena ${net.arenaId}`;
     if (controlsEl) {
       controlsEl.innerHTML =
-        'Hosted arena · two tabs = two players<br />Claim by proximity · Steal with Hit';
+        'Hosted arena · Bots fill Cap<br />Claim by proximity · Steal with Hit';
     }
     if (hintEl) {
       hintEl.textContent =
@@ -167,7 +168,10 @@ function startOnline(net: NetClient) {
 }
 
 function updateHud(
-  snap: { crown: { holderId: string | null }; fighters: { id: string; displayName: string; score: number }[] },
+  snap: {
+    crown: { holderId: string | null };
+    fighters: { id: string; displayName: string; score: number; kind?: string }[];
+  },
   localId: string,
 ) {
   const local = snap.fighters.find((f) => f.id === localId);
@@ -180,4 +184,35 @@ function updateHud(
     }
   }
   if (scoreEl && local) scoreEl.textContent = local.score.toFixed(1);
+  updateLeaderboard(snap, localId);
+}
+
+/** Rank Fighters (Players + Bots) by Score — ADR 0004 / CONTEXT Leaderboard. */
+function updateLeaderboard(
+  snap: {
+    crown: { holderId: string | null };
+    fighters: { id: string; displayName: string; score: number; kind?: string }[];
+  },
+  localId: string,
+) {
+  if (!leaderboardList) return;
+  const ranked = snap.fighters
+    .filter((f) => f.kind !== 'dummy')
+    .slice()
+    .sort((a, b) => b.score - a.score || a.displayName.localeCompare(b.displayName));
+
+  leaderboardList.replaceChildren();
+  for (const f of ranked) {
+    const li = document.createElement('li');
+    if (f.id === localId) li.classList.add('you');
+    if (snap.crown.holderId === f.id) li.classList.add('holder');
+    const name = document.createElement('span');
+    name.className = 'lb-name';
+    name.textContent = f.id === localId ? `${f.displayName} (you)` : f.displayName;
+    const score = document.createElement('span');
+    score.className = 'lb-score';
+    score.textContent = f.score.toFixed(1);
+    li.append(name, score);
+    leaderboardList.append(li);
+  }
 }
